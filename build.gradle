@@ -5,7 +5,12 @@ plugins {
 }
 
 group = 'org.sophie'
-version = '0.1.0'
+// DECLARED_VERSION is the human-bumped source of truth. At release the publish workflow passes
+// -PreleaseVersion=<tag without the leading v> so the PUBLISHED version comes from the git tag, and it
+// asserts the tag equals DECLARED_VERSION first (fails otherwise) — so a v0.2.0 tag can never publish
+// while build.gradle still says 0.1.0. Local publishToMavenLocal (no -P) uses DECLARED_VERSION as-is.
+ext.DECLARED_VERSION = '0.1.0'
+version = project.findProperty('releaseVersion') ?: DECLARED_VERSION
 description = 'sophie-protos — single source of truth for all sophie gRPC contracts'
 
 // ── Single place to pin the proto/grpc toolchain. This is now the ONLY repo that runs protoc; every
@@ -54,13 +59,25 @@ dependencies {
     compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
 }
 
-// Ship the .proto sources inside the jar (under /proto) alongside the compiled classes. Nothing
-// consumes them today, but a future Dart/TypeScript client needs a source to generate from and this
-// costs nothing now.
+// Ship the .proto sources inside the jar exactly ONCE, under /proto — a single namespaced tree a future
+// Dart/TypeScript consumer can point protoc at (e.g. `protoc -I=<jar>/proto ...`). The protobuf plugin
+// also copies them into the jar ROOT, producing a confusing doubled tree, so drop any .proto that is NOT
+// under proto/ and keep the single namespaced copy this jar block adds.
 jar {
     from('src/main/proto') {
         into 'proto'
     }
+    eachFile { details ->
+        if (details.name.endsWith('.proto') && !details.path.startsWith('proto/')) {
+            details.exclude()
+        }
+    }
+}
+
+// Emit the DECLARED version (tag-independent) so the publish workflow can assert it matches the git tag
+// (a v0.1.0 tag must publish 0.1.0) and fail loudly on a mismatch rather than shipping the wrong version.
+tasks.register('printVersion') {
+    doLast { println DECLARED_VERSION }
 }
 
 publishing {
@@ -74,7 +91,7 @@ publishing {
         // or env vars, so nothing secret lives in the repo. See README / the pass-1 report for setup.
         maven {
             name = 'GitHubPackages'
-            url = uri("https://maven.pkg.github.com/${project.findProperty('gpr.owner') ?: 'REPLACE_WITH_GITHUB_OWNER'}/sophie-protos")
+            url = uri("https://maven.pkg.github.com/${project.findProperty('gpr.owner') ?: 'Sophie-KC'}/sophie-protos")
             credentials {
                 username = project.findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
                 password = project.findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')

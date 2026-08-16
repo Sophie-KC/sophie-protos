@@ -1,0 +1,55 @@
+name: publish
+
+# Publishes org.sophie:sophie-protos to GitHub Packages. This is NOT an instance of the generic
+# java-service template — protos publish a Maven artifact and build no container image — and it is
+# intentionally the first pipeline, because it settles the GitHub Packages auth/access model.
+on:
+  push:
+    tags:
+      - "v*" # a v0.1.0 tag publishes 0.1.0 (see the version guard below)
+  workflow_dispatch: {} # manual re-run; publishes the DECLARED version, no tag guard
+
+# Least privilege: read the repo, write packages. Nothing else. The built-in GITHUB_TOKEN is scoped to
+# THIS repo's packages, which is exactly what publishing needs — no PAT secret required.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Shared JDK + Gradle setup (pinned to a tag, never @main).
+      - uses: Sophie-KC/sophie-ci/.github/actions/setup-java-gradle@v1
+
+      # Tag → version guard (tag pushes only). The published version comes from the tag; fail loudly if
+      # build.gradle's DECLARED_VERSION disagrees, rather than silently shipping the wrong number.
+      - name: Verify tag matches declared version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          DECLARED="$(./gradlew -q printVersion)"
+          echo "tag=$GITHUB_REF_NAME  tagVersion=$TAG_VERSION  declared=$DECLARED"
+          if [ "$TAG_VERSION" != "$DECLARED" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match build.gradle DECLARED_VERSION ($DECLARED). Bump DECLARED_VERSION or fix the tag."
+            exit 1
+          fi
+
+      # Build + verify BEFORE publishing, so a broken artifact never reaches the registry.
+      - name: Build & verify
+        run: ./gradlew clean build
+
+      # Publish. On a tag push the version is taken FROM THE TAG (-PreleaseVersion); on a manual dispatch
+      # there is no tag, so it publishes the DECLARED_VERSION.
+      - name: Publish to GitHub Packages
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            ./gradlew publish -PreleaseVersion="${GITHUB_REF_NAME#v}"
+          else
+            ./gradlew publish
+          fi
