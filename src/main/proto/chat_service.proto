@@ -1,0 +1,356 @@
+syntax = "proto3";
+
+package com.platform.chat.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.chatservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "common/pagination.proto";
+
+service ChatService {
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // ===================== Conversations + membership =====================
+  // Messages, threads, reactions, mentions, read state, and attachments are a separate step —
+  // their tables exist (messages FKs from several of them) but no RPCs touch them yet.
+
+  // Any org member may call this. Creator becomes OWNER; each valid initial_member_user_ids entry
+  // becomes MEMBER. Every member (creator included) must be validated as an org member first.
+  rpc CreateGroupChannel(CreateGroupChannelRequest) returns (Conversation);
+  // CHANNEL only (rejected for DIRECT). Caller must be OWNER or ADMIN of the conversation.
+  rpc AddConversationMember(AddConversationMemberRequest) returns (google.protobuf.Empty);
+  // CHANNEL only (rejected for DIRECT). Caller must be OWNER or ADMIN; the OWNER cannot be removed
+  // this way — ownership must be transferred first.
+  rpc RemoveConversationMember(RemoveConversationMemberRequest) returns (google.protobuf.Empty);
+  // Only the current OWNER may call. Atomically demotes the current OWNER to ADMIN and promotes
+  // new_owner_user_id (who must already be a member) to OWNER.
+  rpc TransferOwnership(TransferOwnershipRequest) returns (google.protobuf.Empty);
+  // The caller's conversations in this org, split by type. direct_conversations is empty until DM
+  // conversations exist (lazily created by the Messages step) — expected, not a bug here.
+  rpc ListMyConversations(ListMyConversationsRequest) returns (ListMyConversationsResponse);
+  // Caller must be a member. Returns the conversation plus its member list with roles.
+  rpc GetConversation(GetConversationRequest) returns (Conversation);
+
+  // ===================== Messages, threads, reactions, mentions, read state =====================
+
+  // Targets an existing conversation (conversation_id) or lazily starts/continues a DM
+  // (direct_message_target) — reuses the existing DIRECT conversation between caller and recipient
+  // in that org if one exists, creates it (both members, no OWNER/ADMIN) otherwise, in the same
+  // transaction as the message insert. Caller must be a member of the target conversation (or, for
+  // the lazy-DM case, an org member). Thread depth is exactly one level: thread_root_message_id must
+  // not itself be a thread reply. Every mentioned_user_ids entry must already be a conversation
+  // member. Publishes a live event to every conversation member over Redis Pub/Sub.
+  rpc SendMessage(SendMessageRequest) returns (Message);
+  // Only the original sender may edit. Publishes a live event to conversation members.
+  rpc EditMessage(EditMessageRequest) returns (Message);
+  // Soft delete. Sender always may; for CHANNEL conversations OWNER/ADMIN may too; for DIRECT only
+  // the sender. Publishes a live event to conversation members.
+  rpc DeleteMessage(DeleteMessageRequest) returns (google.protobuf.Empty);
+  // Main feed only (thread_root_message_id IS NULL); soft-deleted messages are included so reply
+  // chains don't show gaps. Returned page is always ascending by created_at (oldest first, newest
+  // last). Keyset on (created_at, id); page.direction BACKWARD (default) reads older than the cursor,
+  // FORWARD reads newer. Caller must be a conversation member.
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  // Replies to a given thread root, oldest first. Caller must be a member of the root message's
+  // conversation.
+  rpc ListThreadReplies(ListThreadRepliesRequest) returns (ListThreadRepliesResponse);
+  // Idempotent: the same user+emoji twice is a no-op (matches the reactions PK). Caller must be a
+  // conversation member. Publishes a live event.
+  rpc AddReaction(AddReactionRequest) returns (google.protobuf.Empty);
+  rpc RemoveReaction(RemoveReactionRequest) returns (google.protobuf.Empty);
+  // Upserts read_states. Caller must be a conversation member. Not published live — read state is
+  // pulled on demand, not pushed.
+  rpc MarkAsRead(MarkAsReadRequest) returns (google.protobuf.Empty);
+  // Message-scoped download authorization: verifies requested_by is a member of the conversation the
+  // message belongs to AND that file_id is actually attached to message_id, then returns a fresh
+  // short-lived presigned GET URL (obtained from File Service internally). This is the trust boundary
+  // the File Service delegates — File Service itself does no permission checks.
+  rpc GetAttachmentDownloadUrl(GetAttachmentDownloadUrlRequest) returns (GetAttachmentDownloadUrlResponse);
+  // Channel topic/description. Caller (from identity context) must be OWNER or ADMIN of the channel.
+  rpc UpdateChannelDescription(UpdateChannelDescriptionRequest) returns (Conversation);
+  rpc UpdateChannelName(UpdateChannelNameRequest) returns (Conversation); // OWNER/ADMIN
+  // Pinned messages — any conversation member may pin/unpin (collaborative tier, like reactions).
+  rpc PinMessage(PinMessageRequest) returns (google.protobuf.Empty);
+  rpc UnpinMessage(UnpinMessageRequest) returns (google.protobuf.Empty);
+  rpc ListPinnedMessages(ListPinnedMessagesRequest) returns (ListPinnedMessagesResponse); // chronological, any member
+}
+
+message UpdateChannelDescriptionRequest {
+  string conversation_id = 1;
+  string description = 2; // blank clears it
+}
+
+message UpdateChannelNameRequest {
+  string conversation_id = 1;
+  string name = 2;
+}
+
+message PinMessageRequest {
+  string message_id = 1;
+}
+
+message UnpinMessageRequest {
+  string message_id = 1;
+}
+
+message ListPinnedMessagesRequest {
+  string conversation_id = 1;
+}
+
+message ListPinnedMessagesResponse {
+  repeated Message messages = 1; // chronological by when pinned
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PingResponse {
+  string message = 1;
+  // Echoes the user id the server read from x-user-id metadata (identity forwarded by the Gateway).
+  // Scaffold-only: lets us verify identity propagation before real chat RPCs exist.
+  string user_id = 2;
+}
+
+// ===================== Conversations + membership =====================
+
+message ConversationMember {
+  string user_id = 1;
+  string role = 2;       // OWNER / ADMIN / MEMBER
+  string added_by = 3;   // empty if not recorded (e.g. the creator's own OWNER row)
+  google.protobuf.Timestamp joined_at = 4;
+}
+
+message Conversation {
+  string id = 1;
+  string org_id = 2;
+  string type = 3;        // CHANNEL / DIRECT
+  string name = 4;        // empty for DIRECT
+  string created_by = 5;
+  google.protobuf.Timestamp created_at = 6;
+  repeated ConversationMember members = 7;
+  string description = 9; // channel topic; empty for DMs / undescribed channels (field 8 = unread_count below)
+  // Main-feed messages (thread_root_message_id IS NULL, not soft-deleted) created after the
+  // caller's read_states pointer for this conversation — 0 once caught up, full count if never
+  // opened. Only ListMyConversations computes this for real; other RPCs that return a Conversation
+  // (CreateGroupChannel, GetConversation) send 0, which happens to be correct for a brand-new
+  // channel but is a stub elsewhere — not part of this feature's scope.
+  int64 unread_count = 8;
+}
+
+message CreateGroupChannelRequest {
+  string org_id = 1;
+  string name = 2;
+  repeated string initial_member_user_ids = 3;
+}
+
+message AddConversationMemberRequest {
+  string conversation_id = 1;
+  string user_id = 2;
+}
+
+message RemoveConversationMemberRequest {
+  string conversation_id = 1;
+  string user_id = 2;
+}
+
+message TransferOwnershipRequest {
+  string conversation_id = 1;
+  string new_owner_user_id = 2;
+}
+
+message ListMyConversationsRequest {
+  string org_id = 1;
+}
+
+message ListMyConversationsResponse {
+  repeated Conversation direct_conversations = 1;
+  repeated Conversation group_conversations = 2;
+}
+
+message GetConversationRequest {
+  string conversation_id = 1;
+}
+
+// ===================== Messages, threads, reactions, mentions, read state =====================
+
+message Message {
+  string id = 1;
+  string conversation_id = 2;
+  string sender_id = 3;
+  string content = 4;                          // client-supplied JSON, stored/returned opaquely
+  optional string reply_to_message_id = 5;      // simple in-feed reply; independent of thread_root
+  optional string thread_root_message_id = 6;   // thread reply; independent of reply_to
+  bool is_thread_root = 7;                      // set on the root once it has at least one reply
+  google.protobuf.Timestamp created_at = 8;
+  optional google.protobuf.Timestamp edited_at = 9;
+  optional google.protobuf.Timestamp deleted_at = 10; // presence = soft-deleted; content still returned
+  repeated string mentioned_user_ids = 11;
+  repeated MessageAttachment attachments = 12;
+  // Grouped by emoji (each with the set of users who reacted with it) — this is the shape a
+  // reaction-pill UI needs directly (emoji + count + who), not a flat per-reaction list. Populated
+  // by ListMessages/ListThreadReplies (batch-fetched); empty on SendMessage's response (a brand-new
+  // message has none yet) and on EditMessage/DeleteMessage's responses (out of scope for this pass).
+  repeated MessageReaction reactions = 13;
+  // Read receipt for the SENDER's own view: true once at least one OTHER conversation member has
+  // read up to this message (message.created_at <= the latest last_read_at among non-sender members).
+  // Computed per-conversation on the ListMessages/ListThreadReplies read paths; SendMessage's
+  // immediate response leaves it false (nothing's been read yet at send time).
+  bool seen = 14;
+  // Opaque keyset cursor for THIS message (server-encoded (created_at, id)). Lets a client that holds a
+  // message page both directions from it — e.g. click a mention/linked message, then ListMessages with
+  // this cursor + direction=BACKWARD (older) and =FORWARD (newer). Clients never parse it.
+  string cursor = 15;
+}
+
+message MessageReaction {
+  string emoji = 1;
+  repeated string user_ids = 2;
+}
+
+message MessageAttachment {
+  string id = 1;
+  string file_id = 2;
+  string file_name = 3;
+  string mime_type = 4;      // resolved from File Service (GetFile)
+  int64 size_bytes = 5;      // resolved from File Service (GetFile)
+  // Short-lived presigned GET URL, populated only on read paths (ListMessages/ListThreadReplies) for
+  // convenience; empty on SendMessage's response and its message.created/edited events (clients fetch
+  // a fresh URL on demand via GetAttachmentDownloadUrl, which re-checks message-scoped permission).
+  string download_url = 6;
+}
+
+message DirectMessageTarget {
+  string org_id = 1;
+  string recipient_user_id = 2;
+}
+
+message SendMessageRequest {
+  oneof target {
+    string conversation_id = 1;
+    DirectMessageTarget direct_message_target = 2;
+  }
+  string content = 3;
+  optional string reply_to_message_id = 4;
+  optional string thread_root_message_id = 5;
+  repeated string mentioned_user_ids = 6;
+  // Attachment plumbing only (no File Service yet): parallel arrays, same length, ids trusted as-is.
+  repeated string attachment_file_ids = 7;
+  repeated string attachment_file_names = 8;
+  // When true, server resolves every current conversation member and mentions each of them (union'd
+  // with mentioned_user_ids, deduplicated) rather than the caller enumerating the member list.
+  bool mention_everyone = 9;
+}
+
+message EditMessageRequest {
+  string message_id = 1;
+  string content = 2;
+}
+
+message DeleteMessageRequest {
+  string message_id = 1;
+}
+
+message ListMessagesRequest {
+  string conversation_id = 1;
+  // Keyset on (created_at, id). Natural default direction = BACKWARD (older than cursor); empty cursor
+  // = most recent page. FORWARD pages toward newer — used to jump to a linked/mentioned message and
+  // read both ways from it.
+  .org.sophie.common.PageRequest page = 2;
+}
+
+message ListMessagesResponse {
+  repeated Message messages = 1; // always returned ascending by created_at (oldest first) for display
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message ListThreadRepliesRequest {
+  string thread_root_message_id = 1;
+  // Keyset on (created_at, id). Natural default direction = FORWARD (older→newer within the thread).
+  .org.sophie.common.PageRequest page = 2;
+}
+
+message ListThreadRepliesResponse {
+  repeated Message replies = 1; // ascending by created_at (oldest first, newest last)
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message AddReactionRequest {
+  string message_id = 1;
+  string emoji = 2;
+}
+
+message RemoveReactionRequest {
+  string message_id = 1;
+  string emoji = 2;
+}
+
+message GetAttachmentDownloadUrlRequest {
+  string message_id = 1;
+  string file_id = 2;
+  string requested_by = 3; // internal user id of the caller (Gateway forwards x-user-id)
+}
+
+message GetAttachmentDownloadUrlResponse {
+  string download_url = 1;
+  int32 expires_in_seconds = 2;
+}
+
+message MarkAsReadRequest {
+  string conversation_id = 1;
+  optional string last_read_message_id = 2;
+}
+
+// ===================== Realtime event envelope =====================
+// Not part of the RPC surface. JSON-serialized (via protobuf JsonFormat) and PUBLISHed to
+// `user:{userId}:events` for every affected conversation member — websocket-service relays it
+// opaquely (it doesn't parse this), the frontend is the only real consumer.
+
+message ChatEvent {
+  string type = 1; // message.created / message.edited / message.deleted / reaction.added / reaction.removed / read_state.updated
+  string conversation_id = 2;
+  optional Message message = 3;
+  optional ReactionEvent reaction = 4;
+  optional ReadStateEvent read_state = 5;
+}
+
+message ReactionEvent {
+  string message_id = 1;
+  string user_id = 2;
+  string emoji = 3;
+}
+
+// Published (read_state.updated) to the OTHER conversation members when a reader calls MarkAsRead,
+// so a sender's open client can flip its checkmarks from sent to seen live, without a refetch.
+message ReadStateEvent {
+  string conversation_id = 1;
+  string reader_user_id = 2;                 // who just read; never the recipients of this event
+  google.protobuf.Timestamp last_read_at = 3; // the reader's new read-through timestamp
+}
+
+// ===================== Notification Service integration =====================
+// JSON shapes Chat Service builds when calling Notification Service's CreateNotification —
+// serialized via protobuf JsonFormat (same technique as ChatEvent above) into
+// source_reference/payload, which Notification Service stores and returns opaquely. Not part of
+// ChatService's own RPC surface.
+
+message MentionSourceReference {
+  string conversation_id = 1;
+  string message_id = 2;
+}
+
+message ThreadReplySourceReference {
+  string conversation_id = 1;
+  string thread_root_message_id = 2;
+  string message_id = 3;
+}
+
+message ChatNotificationPayload {
+  string sender_id = 1;
+  string content_preview = 2; // Plain text, not raw content JSON: MessageService flattens the TipTap
+                               // document (mentions rendered as "@label", blocks newline-joined) and
+                               // truncates AFTER flattening, so this never contains partial JSON.
+                               // See MessageService.contentPreview()/plainText()/walkForText().
+}

@@ -1,0 +1,645 @@
+syntax = "proto3";
+
+package com.platform.task.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.taskservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "common/pagination.proto";
+
+// Task Service: projects, an org-wide task-type catalog, and per-project workflow (statuses +
+// transitions). gRPC-only, internal (called behind the Gateway, which forwards the acting user's
+// internal id as `requested_by`). Project access is resolved against Org Service's role_assignments at
+// scope_type=PROJECT — Task Service never owns its own access model. Boards, labels, and tasks are
+// follow-up steps (their tables are not created yet).
+service TaskService {
+  // ── Projects ──
+  // Creates the project, grants the creator PROJECT access (AssignScopeRole → "Project Admin"), and
+  // seeds a default workflow (To Do / In Progress / Done, permissive transitions).
+  rpc CreateProject(CreateProjectRequest) returns (Project);
+  rpc GetProject(GetProjectRequest) returns (Project);                       // requires project access
+  rpc ListMyProjects(ListMyProjectsRequest) returns (ListMyProjectsResponse); // accessible projects in an org
+  rpc DeleteProject(DeleteProjectRequest) returns (google.protobuf.Empty);   // soft-delete; creator or project admin
+
+  // ── Task Types (org-wide catalog) ──
+  rpc CreateTaskType(CreateTaskTypeRequest) returns (TaskType);              // org admin only
+  rpc ListTaskTypes(ListTaskTypesRequest) returns (ListTaskTypesResponse);   // any org member
+  rpc UpdateTaskType(UpdateTaskTypeRequest) returns (TaskType);              // org admin only
+  rpc DeleteTaskType(DeleteTaskTypeRequest) returns (google.protobuf.Empty); // org admin only
+
+  // ── Workflow (per-project) ──
+  rpc CreateWorkflowStatus(CreateWorkflowStatusRequest) returns (WorkflowStatus);          // project admin
+  rpc ListWorkflowStatuses(ListWorkflowStatusesRequest) returns (ListWorkflowStatusesResponse); // project member
+  rpc UpdateWorkflowStatus(UpdateWorkflowStatusRequest) returns (WorkflowStatus);          // project admin
+  rpc DeleteWorkflowStatus(DeleteWorkflowStatusRequest) returns (google.protobuf.Empty);   // project admin
+  rpc CreateWorkflowTransition(CreateWorkflowTransitionRequest) returns (WorkflowTransition);   // project admin
+  rpc ListWorkflowTransitions(ListWorkflowTransitionsRequest) returns (ListWorkflowTransitionsResponse); // project member
+  rpc DeleteWorkflowTransition(DeleteWorkflowTransitionRequest) returns (google.protobuf.Empty); // project admin
+
+  // ── Boards (any project member) ──
+  rpc CreateBoard(CreateBoardRequest) returns (Board);
+  rpc ListBoards(ListBoardsRequest) returns (ListBoardsResponse);
+  rpc UpdateBoard(UpdateBoardRequest) returns (Board);
+  rpc DeleteBoard(DeleteBoardRequest) returns (google.protobuf.Empty);
+
+  // ── Labels (any project member) ──
+  rpc CreateLabel(CreateLabelRequest) returns (Label);
+  rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse);
+  rpc UpdateLabel(UpdateLabelRequest) returns (Label);
+  rpc DeleteLabel(DeleteLabelRequest) returns (google.protobuf.Empty);
+
+  // ── Tasks ──
+  rpc CreateTask(CreateTaskRequest) returns (Task);
+  rpc GetTask(GetTaskRequest) returns (Task);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);        // one query for board + list
+  rpc BatchGetTaskSummaries(BatchGetTaskSummariesRequest) returns (BatchGetTaskSummariesResponse); // cross-link enrichment
+  rpc GetTaskByReference(GetTaskByReferenceRequest) returns (TaskSummary);                          // resolve KEY-NUMBER → task
+  rpc UpdateTask(UpdateTaskRequest) returns (Task);
+  rpc ChangeTaskStatus(ChangeTaskStatusRequest) returns (Task);       // transition- + completion-validated
+  rpc SetTaskParent(SetTaskParentRequest) returns (Task);             // one-level cap; null clears
+
+  // ── Task comments (one-level replies; author-only edit/delete; tombstone-on-delete) ──
+  rpc CreateTaskComment(CreateTaskCommentRequest) returns (TaskComment);
+  rpc EditTaskComment(EditTaskCommentRequest) returns (TaskComment);
+  rpc DeleteTaskComment(DeleteTaskCommentRequest) returns (google.protobuf.Empty);
+  rpc ListTaskComments(ListTaskCommentsRequest) returns (ListTaskCommentsResponse);
+  rpc ListTaskActivity(ListTaskActivityRequest) returns (ListTaskActivityResponse); // field/status change feed (History tab)
+  rpc SetTaskEpic(SetTaskEpicRequest) returns (Task);                 // group under an epic; null clears
+  rpc RankTask(RankTaskRequest) returns (Task);                       // manual backlog reorder
+
+  // ── Scrum sprints ──
+  rpc CreateSprint(CreateSprintRequest) returns (Sprint);
+  rpc UpdateSprint(UpdateSprintRequest) returns (Sprint);
+  rpc ListSprints(ListSprintsRequest) returns (ListSprintsResponse);
+  rpc StartSprint(StartSprintRequest) returns (Sprint);               // FUTURE → ACTIVE (one active/project)
+  rpc CompleteSprint(CompleteSprintRequest) returns (Sprint);         // ACTIVE → COMPLETE; carries survivors
+  rpc ReopenSprint(ReopenSprintRequest) returns (Sprint);            // COMPLETE → ACTIVE; no task moves
+  rpc DeleteSprint(DeleteSprintRequest) returns (google.protobuf.Empty); // FUTURE only; tasks → backlog
+  rpc MoveTaskToSprint(MoveTaskToSprintRequest) returns (Task);       // (re)assign one task; absent = backlog
+  rpc DeleteTask(DeleteTaskRequest) returns (google.protobuf.Empty);  // soft-delete + cascade; reporter/admin
+  rpc AddTaskLabel(AddTaskLabelRequest) returns (google.protobuf.Empty);
+  rpc RemoveTaskLabel(RemoveTaskLabelRequest) returns (google.protobuf.Empty);
+  rpc BlockTask(BlockTaskRequest) returns (google.protobuf.Empty);
+  rpc UnblockTask(UnblockTaskRequest) returns (google.protobuf.Empty);
+
+  // ── Task ↔ Doc linking (delegates to Doc Service; validates task-side access first) ──
+  rpc LinkDoc(LinkDocRequest) returns (google.protobuf.Empty);
+  rpc UnlinkDoc(UnlinkDocRequest) returns (google.protobuf.Empty);
+  rpc ListLinkedDocs(ListLinkedDocsRequest) returns (ListLinkedDocsResponse);
+}
+
+// ===================== Messages =====================
+
+message Project {
+  string id = 1;
+  string org_id = 2;
+  string key = 3;
+  string name = 4;
+  string description = 5;
+  string created_by = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message TaskType {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;
+  optional string icon = 4; // absent = none
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message WorkflowStatus {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  int32 order_index = 4;
+  bool is_completion_status = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message WorkflowTransition {
+  string id = 1;
+  string project_id = 2;
+  string from_status_id = 3;
+  string to_status_id = 4;
+}
+
+// ── Projects ──
+
+message CreateProjectRequest {
+  string requested_by = 1; // acting user (creator); must be an org member
+  string org_id = 2;
+  string key = 3;          // unique per org
+  string name = 4;
+  string description = 5;  // optional
+}
+
+message GetProjectRequest {
+  string requested_by = 1;
+  string project_id = 2;
+}
+
+message ListMyProjectsRequest {
+  string requested_by = 1;
+  string org_id = 2;
+}
+
+message ListMyProjectsResponse {
+  repeated Project projects = 1;
+}
+
+message DeleteProjectRequest {
+  string requested_by = 1;
+  string project_id = 2;
+}
+
+// ── Task Types ──
+
+message CreateTaskTypeRequest {
+  string requested_by = 1;
+  string org_id = 2;
+  string name = 3;
+  string icon = 4; // optional
+}
+
+message ListTaskTypesRequest {
+  string requested_by = 1;
+  string org_id = 2;
+}
+
+message ListTaskTypesResponse {
+  repeated TaskType task_types = 1;
+}
+
+message UpdateTaskTypeRequest {
+  string requested_by = 1;
+  string task_type_id = 2;
+  optional string name = 3; // partial: absent = unchanged
+  optional string icon = 4; // partial: present-empty clears
+}
+
+message DeleteTaskTypeRequest {
+  string requested_by = 1;
+  string task_type_id = 2;
+}
+
+// ── Workflow ──
+
+message CreateWorkflowStatusRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  string name = 3;
+  int32 order_index = 4;
+  bool is_completion_status = 5;
+}
+
+message ListWorkflowStatusesRequest {
+  string requested_by = 1;
+  string project_id = 2;
+}
+
+message ListWorkflowStatusesResponse {
+  repeated WorkflowStatus statuses = 1;
+}
+
+message UpdateWorkflowStatusRequest {
+  string requested_by = 1;
+  string status_id = 2;
+  optional string name = 3;
+  optional int32 order_index = 4;
+  optional bool is_completion_status = 5;
+}
+
+message DeleteWorkflowStatusRequest {
+  string requested_by = 1;
+  string status_id = 2;
+}
+
+message CreateWorkflowTransitionRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  string from_status_id = 3;
+  string to_status_id = 4;
+}
+
+message ListWorkflowTransitionsRequest {
+  string requested_by = 1;
+  string project_id = 2;
+}
+
+message ListWorkflowTransitionsResponse {
+  repeated WorkflowTransition transitions = 1;
+}
+
+message DeleteWorkflowTransitionRequest {
+  string requested_by = 1;
+  string transition_id = 2;
+}
+
+// ===================== Boards =====================
+
+message Board {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  string default_filter = 4; // opaque JSON string
+  google.protobuf.Timestamp created_at = 5;
+  bool is_default = 6;        // the board a project opens on (one per project)
+}
+
+message CreateBoardRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  string name = 3;
+  string default_filter = 4; // optional; defaults to "{}"
+}
+
+message ListBoardsRequest {
+  string requested_by = 1;
+  string project_id = 2;
+}
+
+message ListBoardsResponse {
+  repeated Board boards = 1;
+}
+
+message UpdateBoardRequest {
+  string requested_by = 1;
+  string board_id = 2;
+  optional string name = 3;
+  optional string default_filter = 4;
+  optional bool make_default = 5; // true = make this the project's default board (unsets any other)
+}
+
+message DeleteBoardRequest {
+  string requested_by = 1;
+  string board_id = 2;
+}
+
+// ===================== Labels =====================
+
+message Label {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  optional string color = 4;
+}
+
+message CreateLabelRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  string name = 3;
+  string color = 4; // optional
+}
+
+message ListLabelsRequest {
+  string requested_by = 1;
+  string project_id = 2;
+}
+
+message ListLabelsResponse {
+  repeated Label labels = 1;
+}
+
+message UpdateLabelRequest {
+  string requested_by = 1;
+  string label_id = 2;
+  optional string name = 3;
+  optional string color = 4;
+}
+
+message DeleteLabelRequest {
+  string requested_by = 1;
+  string label_id = 2;
+}
+
+// ===================== Tasks =====================
+
+message Task {
+  string id = 1;
+  string project_id = 2;
+  int32 task_number = 3;
+  string task_type_id = 4;
+  optional string parent_task_id = 5;
+  string status_id = 6;
+  string title = 7;
+  optional string description = 8;
+  optional string assignee_id = 9;
+  string reporter_id = 10;
+  repeated string label_ids = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+  repeated TaskSummary blocks = 14;      // tasks THIS task blocks
+  repeated TaskSummary blocked_by = 15;  // tasks blocking THIS task
+  string priority = 16;                  // HIGHEST | HIGH | MEDIUM | LOW | LOWEST
+  optional int32 story_points = 17;      // estimate; absent = unestimated
+  optional string due_date = 18;         // ISO yyyy-MM-dd; absent = none
+  int64 rank = 19;                       // manual backlog order within the project (ascending)
+  optional string sprint_id = 20;        // sprint this task belongs to; absent = backlog
+  optional string epic_id = 21;          // epic (a task of the Epic type) this groups under; absent = none
+}
+
+// Lightweight reference for dependency lists — enough to render a link, never full task detail.
+message TaskSummary {
+  string id = 1;
+  int32 task_number = 2;
+  string title = 3;
+  string status_id = 4;
+}
+
+message CreateTaskRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  string task_type_id = 3;
+  string title = 4;
+  optional string description = 5;
+  optional string assignee_id = 6;
+  optional string parent_task_id = 7;
+  optional string reporter_id = 8; // defaults to the caller
+  repeated string label_ids = 9;
+  optional string priority = 10;     // defaults MEDIUM
+  optional int32 story_points = 11;
+  optional string due_date = 12;     // ISO yyyy-MM-dd
+  optional string epic_id = 13;      // group under this epic
+}
+
+message GetTaskRequest {
+  string requested_by = 1;
+  string task_id = 2;
+}
+
+// Lightweight batch lookup for cross-link enrichment (Docs' linked tasks, richtext smart links). Mirrors
+// Org Service's BatchGetUsers: returns a summary for each id that exists (missing/deleted ids are simply
+// omitted), no per-task access filtering beyond being a normal authenticated caller.
+message BatchGetTaskSummariesRequest {
+  string requested_by = 1;
+  repeated string task_ids = 2;
+}
+
+message BatchGetTaskSummariesResponse {
+  repeated TaskSummaryDetail summaries = 1;
+}
+
+// Resolve a human task reference (projectKey-taskNumber) to a task. projectKey is unique only per org, so
+// the lookup is scoped to the projects the caller can access.
+message GetTaskByReferenceRequest {
+  string requested_by = 1;
+  string project_key = 2;
+  int32 task_number = 3;
+}
+
+// Enough to render a cross-link and build its full-page URL (project_key + task_number).
+message TaskSummaryDetail {
+  string id = 1;
+  string project_key = 2;
+  int32 task_number = 3;
+  string title = 4;
+  string status_id = 5;
+  string status_name = 6;
+}
+
+message ListTasksRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  // Filters (all optional) — the same set serves board and list views.
+  repeated string label_ids = 3;
+  optional string assignee_id = 4;
+  optional string reporter_id = 5;
+  optional string status_id = 6;
+  // Keyset on task_number ASC (unique per project). Default direction FORWARD.
+  .org.sophie.common.PageRequest page = 7;
+  optional string parent_task_id = 8; // children of this task only
+  optional string task_type_id = 9;   // tasks of this type only (e.g. the "Epic" type)
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message UpdateTaskRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  optional string title = 3;
+  optional string description = 4;
+  optional string assignee_id = 5; // present-empty clears
+  optional string task_type_id = 6;
+  optional string priority = 7;
+  optional int32 story_points = 8;  // present clears when < 0 (see service)
+  optional string due_date = 9;     // present-empty clears
+}
+
+message ChangeTaskStatusRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  string new_status_id = 3;
+}
+
+message SetTaskParentRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  optional string parent_task_id = 3; // absent/empty = clear (un-nest)
+}
+
+message SetTaskEpicRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  optional string epic_id = 3; // absent/empty = remove from its epic
+}
+
+message DeleteTaskRequest {
+  string requested_by = 1;
+  string task_id = 2;
+}
+
+// ── Task comments ──
+
+message TaskComment {
+  string id = 1;
+  string task_id = 2;
+  string author_id = 3;
+  string content = 4;                              // opaque rich-text JSON
+  optional string parent_comment_id = 5;
+  google.protobuf.Timestamp created_at = 6;
+  optional google.protobuf.Timestamp edited_at = 7;
+  optional google.protobuf.Timestamp deleted_at = 8; // presence = soft-deleted (content blanked)
+}
+
+message CreateTaskCommentRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  string content = 3;
+  optional string parent_comment_id = 4; // absent = top-level; a reply-to-a-reply is rejected
+}
+
+message EditTaskCommentRequest {
+  string requested_by = 1;
+  string comment_id = 2;
+  string content = 3;
+}
+
+message DeleteTaskCommentRequest {
+  string requested_by = 1;
+  string comment_id = 2;
+}
+
+message ListTaskCommentsRequest {
+  string requested_by = 1;
+  string task_id = 2;
+}
+
+message ListTaskCommentsResponse {
+  repeated TaskComment comments = 1;
+}
+
+// Task activity log — a structural/field change entry (status/assignee/title/etc.). Separate from comments.
+message TaskActivityEntry {
+  string id = 1;
+  string task_id = 2;
+  string actor_id = 3;
+  string event_type = 4;                            // e.g. status_changed, assignee_changed, label_added
+  string details = 5;                               // opaque JSON: enough to render the entry (old/new values)
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ListTaskActivityRequest {
+  string requested_by = 1;
+  string task_id = 2;
+}
+
+message ListTaskActivityResponse {
+  repeated TaskActivityEntry entries = 1;
+}
+
+// Manual backlog reorder: place task_id between previous_task_id and next_task_id (either may be absent
+// to move to an end). Both absent = move to the bottom of the backlog.
+message RankTaskRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  optional string previous_task_id = 3; // the task that should sit directly ABOVE this one
+  optional string next_task_id = 4;     // the task that should sit directly BELOW this one
+}
+
+// ── Scrum sprints ──
+
+message Sprint {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  optional string goal = 4;
+  string state = 5;                              // FUTURE | ACTIVE | COMPLETE
+  optional string start_date = 6;                // ISO yyyy-MM-dd
+  optional string end_date = 7;                  // ISO yyyy-MM-dd
+  optional google.protobuf.Timestamp started_at = 8;
+  optional google.protobuf.Timestamp completed_at = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message CreateSprintRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  string name = 3;
+  optional string goal = 4;
+  optional string start_date = 5;
+  optional string end_date = 6;
+}
+
+message UpdateSprintRequest {
+  string requested_by = 1;
+  string sprint_id = 2;
+  optional string name = 3;
+  optional string goal = 4;
+  optional string start_date = 5;
+  optional string end_date = 6;
+}
+
+message ListSprintsRequest {
+  string requested_by = 1;
+  string project_id = 2;
+}
+
+message ListSprintsResponse {
+  repeated Sprint sprints = 1;
+}
+
+message StartSprintRequest {
+  string requested_by = 1;
+  string sprint_id = 2;
+}
+
+message CompleteSprintRequest {
+  string requested_by = 1;
+  string sprint_id = 2;
+  optional string target_sprint_id = 3; // carry survivors here; absent = backlog
+}
+
+message DeleteSprintRequest {
+  string requested_by = 1;
+  string sprint_id = 2;
+}
+
+message ReopenSprintRequest {
+  string requested_by = 1;
+  string sprint_id = 2;
+}
+
+message MoveTaskToSprintRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  optional string sprint_id = 3; // absent/empty = move to backlog
+}
+
+message AddTaskLabelRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  string label_id = 3;
+}
+
+message RemoveTaskLabelRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  string label_id = 3;
+}
+
+message BlockTaskRequest {
+  string requested_by = 1;
+  string blocking_task_id = 2;
+  string blocked_task_id = 3;
+}
+
+message UnblockTaskRequest {
+  string requested_by = 1;
+  string blocking_task_id = 2;
+  string blocked_task_id = 3;
+}
+
+// ===================== Task ↔ Doc linking =====================
+
+message LinkDocRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  string doc_page_id = 3;
+}
+
+message UnlinkDocRequest {
+  string requested_by = 1;
+  string task_id = 2;
+  string doc_page_id = 3;
+}
+
+message ListLinkedDocsRequest {
+  string requested_by = 1;
+  string task_id = 2;
+}
+
+message LinkedDoc {
+  string page_id = 1;
+  string title = 2;
+  string space_key = 3;
+}
+
+message ListLinkedDocsResponse {
+  repeated LinkedDoc docs = 1; // only pages the caller can access (Doc Service filters)
+}

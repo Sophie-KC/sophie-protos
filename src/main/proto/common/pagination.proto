@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package org.sophie.common;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.common.grpc";
+
+// Shared pagination contract for every paged RPC across all sophie services. One shape, so clients
+// learn it once. KEYSET only — offset paging is rejected because with live-inserting data (chat
+// messages especially) it duplicates and skips rows across pages.
+//
+// The cursor is OPAQUE to clients: server-side base64 of the sort key plus a stable unique tiebreaker
+// id. Clients must never parse or construct one — they only echo back the next_cursor they were given.
+
+// Which way to page relative to the cursor, in the RPC's natural sort order. Exists because chat needs
+// bidirectional paging (scroll history backward; jump to a linked/mentioned message and page both ways
+// from it) — see pagination-unification-pass2-survey.md §3. Every other RPC ignores it (defaults
+// FORWARD), so there is still exactly one PageRequest shape.
+enum PageDirection {
+  PAGE_DIRECTION_UNSPECIFIED = 0; // server default for the RPC (FORWARD everywhere except chat history)
+  FORWARD  = 1;                   // rows AFTER the cursor in the natural sort order
+  BACKWARD = 2;                   // rows BEFORE the cursor
+}
+
+message PageRequest {
+  int32 limit = 1;             // server clamps to a max; 0 means server default
+  string cursor = 2;           // opaque; empty means first page
+  PageDirection direction = 3; // omitted/UNSPECIFIED = the RPC's natural default
+}
+
+message PageResponse {
+  string next_cursor = 1; // opaque; empty means no further pages in this direction
+  bool has_more = 2;
+}

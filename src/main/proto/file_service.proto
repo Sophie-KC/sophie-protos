@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package com.platform.file.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.fileservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// File Service: presigned upload/download flow over MinIO. gRPC-only, internal service-to-service —
+// there is NO caller-identity/permission check here (no x-user-id interceptor like other services):
+// the calling service (Chat Service now, Doc Service later) is responsible for having verified the
+// user may upload/attach/download before calling. Object bytes never transit this service — clients
+// PUT/GET them directly against MinIO via short-lived presigned URLs.
+service FileService {
+  // Dedups on (org_id, checksum) against ACTIVE files: on a hit, returns the existing file with
+  // already_exists=true and no upload URL (caller skips straight to AttachFileReference). On a miss,
+  // creates a PENDING row + a presigned PUT URL.
+  rpc RequestUpload(RequestUploadRequest) returns (RequestUploadResponse);
+  // Verifies the object actually exists in MinIO at the expected key and matches the expected size,
+  // then flips PENDING -> ACTIVE and sets confirmed_at. Fails (does NOT activate) if the object is
+  // missing or the size doesn't match — the client-reported checksum is never trusted blindly.
+  rpc ConfirmUpload(ConfirmUploadRequest) returns (File);
+  // Metadata only — never the bytes (see GetDownloadUrl for content access).
+  rpc GetFile(GetFileRequest) returns (File);
+  // Links a file to an entity (MESSAGE | PAGE). Idempotent. Caller has already authorized the link.
+  rpc AttachFileReference(AttachFileReferenceRequest) returns (google.protobuf.Empty);
+  // Short-lived presigned GET URL for an ACTIVE file. Caller has already authorized the access.
+  rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
+}
+
+message File {
+  string id = 1;
+  string org_id = 2;
+  string uploaded_by = 3;
+  string storage_bucket = 4;
+  string storage_key = 5;
+  string file_name = 6;
+  string mime_type = 7;
+  int64 size_bytes = 8;
+  string checksum = 9;                              // client-computed SHA-256 (hex)
+  string status = 10;                               // PENDING | ACTIVE | ORPHANED
+  google.protobuf.Timestamp created_at = 11;
+  optional google.protobuf.Timestamp confirmed_at = 12;
+  optional google.protobuf.Timestamp deleted_at = 13;
+}
+
+message RequestUploadRequest {
+  string org_id = 1;
+  string uploaded_by = 2;   // internal user id of the uploader (this service does no identity lookup)
+  string file_name = 3;
+  string mime_type = 4;
+  int64 size_bytes = 5;
+  string checksum = 6;      // client-computed SHA-256 (hex), used for (org_id, checksum) dedup
+}
+
+message RequestUploadResponse {
+  string file_id = 1;
+  bool already_exists = 2;         // true = same-checksum ACTIVE file already exists in this org
+  string upload_url = 3;           // presigned PUT URL; empty when already_exists
+  int32 expires_in_seconds = 4;    // upload URL lifetime; 0 when already_exists
+}
+
+message ConfirmUploadRequest {
+  string file_id = 1;
+}
+
+message GetFileRequest {
+  string file_id = 1;
+}
+
+message AttachFileReferenceRequest {
+  string file_id = 1;
+  string entity_type = 2;   // MESSAGE | PAGE
+  string entity_id = 3;
+}
+
+message GetDownloadUrlRequest {
+  string file_id = 1;
+}
+
+message GetDownloadUrlResponse {
+  string download_url = 1;
+  int32 expires_in_seconds = 2;
+}

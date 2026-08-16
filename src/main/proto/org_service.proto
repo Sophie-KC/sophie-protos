@@ -1,0 +1,377 @@
+syntax = "proto3";
+
+package com.platform.org.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.orgservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "common/pagination.proto";
+
+service OrgService {
+  rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
+  rpc CreateOrganization(CreateOrganizationRequest) returns (Organization);
+  rpc GetOrganization(GetOrganizationRequest) returns (Organization);
+  rpc SignUp(SignUpRequest) returns (Organization);
+  // Admin-provisioned org member: creates the Keycloak user (if new), the membership, and the role
+  // assignment immediately, and triggers Keycloak's activation email for brand-new users. Requires
+  // requested_by to be org_id's Org Admin.
+  rpc CreateOrgMember(CreateOrgMemberRequest) returns (OrganizationMembership);
+  // Lists all members of an org with their role + activation status. requested_by must be Org Admin.
+  rpc ListOrgMembers(ListOrgMembersRequest) returns (ListOrgMembersResponse);
+  // Org-scoped autocomplete search over active members by name/email (chat @mentions, new DM).
+  // requested_by must be ANY member of org_id — more permissive than ListOrgMembers, not admin-only.
+  rpc SearchOrgMembers(SearchOrgMembersRequest) returns (SearchOrgMembersResponse);
+  // Internal service-to-service membership check (e.g. Chat Service, before any org-scoped
+  // conversation/membership operation). No requested_by / authorization gate of its own — this IS
+  // the check other services gate on.
+  rpc IsOrgMember(IsOrgMemberRequest) returns (IsOrgMemberResponse);
+  // "Is this user an ADMIN of this org?" — holds the ORG-scope "Org Admin" role. Trusted-internal; for
+  // gating org-wide admin actions in other services (e.g. Task Service's org-wide task-type catalog).
+  rpc IsOrgAdmin(IsOrgAdminRequest) returns (IsOrgAdminResponse);
+  // "Does this user have a role assignment at this scope?" — the generalized, scope-typed sibling of
+  // IsOrgMember. Trusted-internal (no requested_by gate): the check other services gate on for
+  // scoped resources (e.g. Doc Service gating SPACE access on scope_type=SPACE, scope_id=spaceId).
+  rpc HasScopeAccess(HasScopeAccessRequest) returns (HasScopeAccessResponse);
+  // "Who has access to this scope?" — every user with any role assignment at (scope_type, scope_id).
+  // Trusted-internal; a generic building block for "who can see this Space / Project / Channel" (e.g.
+  // Task Service fanning out live board updates to project members).
+  rpc ListScopeMembers(ListScopeMembersRequest) returns (ListScopeMembersResponse);
+  // "Is this user an ADMIN of this scope?" — holds the scope's system (admin-equivalent) role at this
+  // exact scope_id, e.g. the "Space Admin" role auto-assigned at space creation. Narrower than
+  // HasScopeAccess (any assignment). Trusted-internal; for gating scope-management actions such as Doc
+  // Service's add/remove page restriction.
+  rpc IsScopeAdmin(IsScopeAdminRequest) returns (IsScopeAdminResponse);
+  // Trusted-internal grant used at resource-creation time: assign the creator a system role at a
+  // non-ORG scope (find-or-creating that org's system role for the scope type), mirroring how org
+  // creation auto-assigns Org Admin. NOT the admin-gated public AssignRole — that can't grant a
+  // non-admin creator their own initial scope access. Idempotent.
+  rpc AssignScopeRole(AssignScopeRoleRequest) returns (google.protobuf.Empty);
+  // "Does this user hold this role at all?" (any scope) — for a role used as a pseudo-group, e.g.
+  // Doc Service enforcing a page_restrictions ROLE subject. Trusted-internal.
+  rpc HasRoleAssignment(HasRoleAssignmentRequest) returns (HasRoleAssignmentResponse);
+  // "Does this role id reference a real role?" — trusted-internal existence check so callers can
+  // validate a role reference (e.g. a ROLE restriction subject) before storing it.
+  rpc RoleExists(RoleExistsRequest) returns (RoleExistsResponse);
+  // Batch identity lookup by internal user id — no org-scoping, same trusted-internal-caller access
+  // level as IsOrgMember (not a sensitive org-membership query, just name/email). Missing/unknown/
+  // malformed ids are silently omitted from the response, never an error.
+  rpc BatchGetUsers(BatchGetUsersRequest) returns (BatchGetUsersResponse);
+  rpc ListMyOrganizations(ListMyOrganizationsRequest) returns (ListMyOrganizationsResponse);
+  rpc UpdateOrganization(UpdateOrganizationRequest) returns (Organization);
+  rpc UpdateOrganizationStatus(UpdateOrganizationStatusRequest) returns (Organization);
+  rpc GetMyOrganizationBySubdomain(GetMyOrganizationBySubdomainRequest) returns (OrganizationMembership);
+
+  // Role management — all mutating RPCs require requested_by_user_id to be the target org's Org Admin.
+  rpc CreateRole(CreateRoleRequest) returns (Role);
+  rpc UpdateRole(UpdateRoleRequest) returns (Role);
+  rpc DeleteRole(DeleteRoleRequest) returns (google.protobuf.Empty);
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+
+  rpc AssignRole(AssignRoleRequest) returns (RoleAssignment);
+  rpc RevokeRoleAssignment(RevokeRoleAssignmentRequest) returns (google.protobuf.Empty);
+  rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse);
+
+  // Permission catalog — global, not org-scoped; no Org-Admin check (read-only reference data).
+  rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
+}
+
+message ValidateSessionRequest {
+  string keycloak_user_id = 1;
+}
+
+message ValidateSessionResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string org_id = 3;
+}
+
+message CreateOrganizationRequest {
+  string name = 1;
+  string subdomain = 2;
+  string created_by_user_id = 3;
+  repeated string initial_permission_keys = 4;
+}
+
+message GetOrganizationRequest {
+  string org_id = 1;
+}
+
+message SignUpRequest {
+  string email = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string temporary_password = 4;
+  string org_name = 5;
+  string org_subdomain = 6;
+}
+
+message Organization {
+  string id = 1;
+  string name = 2;
+  string subdomain = 3;
+  string status = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message CreateOrgMemberRequest {
+  string org_id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string role_id = 5;      // must be an existing role in this org
+  string requested_by = 6; // caller's internal user id, for the admin-permission check
+}
+
+message ListOrgMembersRequest {
+  string org_id = 1;
+  string requested_by = 2; // for the admin-permission check
+}
+
+message OrgMember {
+  string user_id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string role_name = 5;
+  string status = 6;         // PENDING_ACTIVATION / ACTIVE
+  string provisioned_at = 7;
+  string activated_at = 8;   // empty/omitted if still pending
+}
+
+message ListOrgMembersResponse {
+  repeated OrgMember members = 1;
+}
+
+message SearchOrgMembersRequest {
+  string org_id = 1;
+  string query = 2;        // free-text, matched against name/email
+  string requested_by = 3; // caller's internal user id
+}
+
+message SearchOrgMembersResponse {
+  repeated OrgMember members = 1; // reuses OrgMember; capped, active-only
+}
+
+message IsOrgMemberRequest {
+  string org_id = 1;
+  string user_id = 2;
+}
+
+message IsOrgMemberResponse {
+  bool is_member = 1;
+}
+
+message IsOrgAdminRequest {
+  string org_id = 1;
+  string user_id = 2;
+}
+
+message IsOrgAdminResponse {
+  bool is_admin = 1;
+}
+
+message HasScopeAccessRequest {
+  string user_id = 1;
+  string scope_type = 2; // e.g. SPACE
+  string scope_id = 3;   // the scoped resource id (e.g. spaceId)
+}
+
+message HasScopeAccessResponse {
+  bool has_access = 1;
+}
+
+message ListScopeMembersRequest {
+  string scope_type = 1; // e.g. PROJECT / SPACE / CHANNEL
+  string scope_id = 2;
+}
+
+message ListScopeMembersResponse {
+  repeated string user_ids = 1; // distinct users holding any role at this scope
+}
+
+message IsScopeAdminRequest {
+  string user_id = 1;
+  string scope_type = 2; // e.g. SPACE
+  string scope_id = 3;   // the scoped resource id (e.g. spaceId)
+}
+
+message IsScopeAdminResponse {
+  bool is_admin = 1;
+}
+
+message AssignScopeRoleRequest {
+  string org_id = 1;
+  string user_id = 2;
+  string scope_type = 3; // non-ORG scope, e.g. SPACE
+  string scope_id = 4;   // the scoped resource id (e.g. spaceId)
+}
+
+message HasRoleAssignmentRequest {
+  string user_id = 1;
+  string role_id = 2;
+}
+
+message HasRoleAssignmentResponse {
+  bool has_role = 1;
+}
+
+message RoleExistsRequest {
+  string role_id = 1;
+}
+
+message RoleExistsResponse {
+  bool exists = 1;
+}
+
+message BatchGetUsersRequest {
+  repeated string user_ids = 1;
+}
+
+message UserSummary {
+  string user_id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+}
+
+message BatchGetUsersResponse {
+  repeated UserSummary users = 1; // only the ones actually found — missing ids are simply absent, not errors
+}
+
+message ListMyOrganizationsRequest {
+  string user_id = 1; // org-service internal user id (see ValidateSessionResponse.user_id)
+}
+
+message ListMyOrganizationsResponse {
+  repeated OrganizationMembership memberships = 1;
+}
+
+message OrganizationMembership {
+  Organization organization = 1;
+  string role_name = 2; // the user's ORG-scope role name in this org (e.g. "Org Admin", "Member")
+}
+
+message UpdateOrganizationRequest {
+  string org_id = 1;
+  string requested_by_user_id = 2; // org-service internal user id; must be this org's Org Admin
+  optional string name = 3;        // partial update: only fields actually set are changed
+  optional string subdomain = 4;
+}
+
+message UpdateOrganizationStatusRequest {
+  string org_id = 1;
+  string requested_by_user_id = 2; // org-service internal user id; must be this org's Org Admin
+  string status = 3;               // ACTIVE, SUSPENDED, ARCHIVED — ARCHIVED is the "delete"
+}
+
+message GetMyOrganizationBySubdomainRequest {
+  string user_id = 1; // org-service internal user id
+  string subdomain = 2;
+}
+
+// ===================== Roles =====================
+
+message Role {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;
+  bool is_system_role = 4;   // true for the seeded Org Admin/Member/Guest roles
+  bool is_editable = 5;      // false only for Org Admin (server-derived, never trusted from caller)
+  repeated string permissions = 6; // opaque permission keys (see permission catalog)
+  string scope_type = 7;     // ORG/PROJECT/SPACE/CHANNEL — scope these permissions apply within
+  string description = 8;
+}
+
+message RoleAssignment {
+  string id = 1;
+  string user_id = 2;
+  string role_id = 3;
+  string scope_type = 4;
+  string scope_id = 5;       // the specific project/space/channel id; empty for ORG scope
+}
+
+// Wrapper so an unset `permissions` field (partial update) is distinguishable from an
+// explicitly-empty permission list (clear all permissions). Message-field presence gives us that.
+message PermissionKeys {
+  repeated string keys = 1;
+}
+
+message CreateRoleRequest {
+  string requested_by_user_id = 1; // must be org_id's Org Admin
+  string org_id = 2;
+  string name = 3;
+  string description = 4;
+  string scope_type = 5;           // ORG/PROJECT/SPACE/CHANNEL
+  repeated string permission_keys = 6;
+}
+
+message UpdateRoleRequest {
+  string requested_by_user_id = 1;
+  string role_id = 2;
+  optional string name = 3;
+  optional string description = 4;
+  optional PermissionKeys permissions = 5; // when present, replaces the role's full permission set
+}
+
+message DeleteRoleRequest {
+  string requested_by_user_id = 1;
+  string role_id = 2;
+}
+
+message ListRolesRequest {
+  string requested_by_user_id = 1;
+  string org_id = 2;
+  optional string scope_type = 3;  // optional filter
+}
+
+message ListRolesResponse {
+  repeated Role roles = 1;
+}
+
+message AssignRoleRequest {
+  string requested_by_user_id = 1;
+  string user_id = 2;              // target org member being assigned the role
+  string role_id = 3;
+  string scope_type = 4;           // must equal the role's scope_type
+  string scope_id = 5;             // empty for ORG scope
+}
+
+message RevokeRoleAssignmentRequest {
+  string requested_by_user_id = 1;
+  string assignment_id = 2;
+}
+
+message ListRoleAssignmentsRequest {
+  string requested_by_user_id = 1;
+  // Query mode A: by scope. Query mode B: by user within an org.
+  optional string scope_type = 2;
+  optional string scope_id = 3;
+  optional string user_id = 4;
+  optional string org_id = 5;
+}
+
+message ListRoleAssignmentsResponse {
+  repeated RoleAssignment assignments = 1;
+}
+
+// ===================== Permission catalog =====================
+
+message PermissionItem {
+  string id = 1;
+  string key = 2;
+  string description = 3;
+  string scope_type = 4; // ORG/PROJECT/SPACE/CHANNEL
+}
+
+message ListPermissionsRequest {
+  optional string scope_type = 1; // ORG/PROJECT/SPACE/CHANNEL filter; omitted = all scopes
+  // Keyset on key ASC (unique). Replaces the former offset (page/page_size). Default direction FORWARD.
+  .org.sophie.common.PageRequest page = 2;
+}
+
+message ListPermissionsResponse {
+  repeated PermissionItem permissions = 1;
+  .org.sophie.common.PageResponse page = 2;
+}

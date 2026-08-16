@@ -1,0 +1,84 @@
+plugins {
+    id 'java-library'
+    id 'com.google.protobuf' version '0.9.4'
+    id 'maven-publish'
+}
+
+group = 'org.sophie'
+version = '0.1.0'
+description = 'sophie-protos — single source of truth for all sophie gRPC contracts'
+
+// ── Single place to pin the proto/grpc toolchain. This is now the ONLY repo that runs protoc; every
+//    service and the gateway consume the generated stubs from this artifact instead of generating
+//    their own. Keep these in lockstep — bumping here bumps the wire tooling for the whole platform.
+ext {
+    protocVersion       = '3.25.5'
+    grpcVersion         = '1.68.0'   // protoc-gen-grpc-java AND the grpc-java runtime libs
+    protobufJavaVersion = '3.25.5'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:${protocVersion}"
+    }
+    plugins {
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+        }
+    }
+    generateProtoTasks {
+        all()*.plugins {
+            grpc {}
+        }
+    }
+}
+
+dependencies {
+    // Exported (api) so every consumer gets the proto/grpc runtime transitively and can drop its own
+    // direct declarations — the generated stubs in this jar need these at compile+runtime.
+    api "io.grpc:grpc-protobuf:${grpcVersion}"
+    api "io.grpc:grpc-stub:${grpcVersion}"
+    api "com.google.protobuf:protobuf-java:${protobufJavaVersion}"
+    // grpc-java generated stubs reference javax.annotation.Generated; needed only to COMPILE the
+    // generated sources here, never at runtime — so compileOnly, and not exported to consumers.
+    compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+}
+
+// Ship the .proto sources inside the jar (under /proto) alongside the compiled classes. Nothing
+// consumes them today, but a future Dart/TypeScript client needs a source to generate from and this
+// costs nothing now.
+jar {
+    from('src/main/proto') {
+        into 'proto'
+    }
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        // GitHub Packages. Owner + credentials come from gradle properties (~/.gradle/gradle.properties)
+        // or env vars, so nothing secret lives in the repo. See README / the pass-1 report for setup.
+        maven {
+            name = 'GitHubPackages'
+            url = uri("https://maven.pkg.github.com/${project.findProperty('gpr.owner') ?: 'REPLACE_WITH_GITHUB_OWNER'}/sophie-protos")
+            credentials {
+                username = project.findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
+                password = project.findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')
+            }
+        }
+    }
+}

@@ -1,0 +1,455 @@
+syntax = "proto3";
+
+package com.platform.doc.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.docservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Doc Service: Confluence-style spaces + page hierarchy. gRPC-only, internal (called behind the
+// Gateway, which forwards the acting user's internal id as `requested_by`). Space access is resolved
+// against Org Service's role_assignments at scope_type=SPACE (see orgclient) — Doc Service never owns
+// its own access model. This step covers spaces + page hierarchy only; content/versions/drafts/locks/
+// restrictions/comments/task-links are follow-up steps (their tables already exist for FK integrity).
+service DocService {
+  // Creates the space and grants the creator SPACE-scope access via Org Service (AssignScopeRole).
+  rpc CreateSpace(CreateSpaceRequest) returns (Space);
+  rpc GetSpace(GetSpaceRequest) returns (Space);                            // requires space access
+  rpc ListMySpaces(ListMySpacesRequest) returns (ListMySpacesResponse);     // accessible spaces in an org
+  rpc DeleteSpace(DeleteSpaceRequest) returns (google.protobuf.Empty);      // soft-delete + cascade pages
+  rpc UpdateSpace(UpdateSpaceRequest) returns (Space);                      // partial: name/description/icon
+  rpc RestoreSpace(RestoreSpaceRequest) returns (Space);                    // un-archive + reverse page cascade
+  rpc SetSpaceHomepage(SetSpaceHomepageRequest) returns (Space);            // page_id must belong to space; empty clears
+
+  rpc CreatePage(CreatePageRequest) returns (Page);                         // requires space access
+  rpc GetPage(GetPageRequest) returns (Page);
+  rpc ListPagesInSpace(ListPagesInSpaceRequest) returns (ListPagesInSpaceResponse); // full tree, flat
+  rpc MovePage(MovePageRequest) returns (Page);                             // re-parent and/or reorder
+  rpc RenamePage(RenamePageRequest) returns (Page);                         // title metadata only, no new version
+  rpc DeletePage(DeletePageRequest) returns (google.protobuf.Empty);        // soft-delete + descendants
+  // Doc-scoped attachment download URL (embedded images). Validates page access, then asks File
+  // Service for a presigned GET — same trust boundary as Chat's message-scoped equivalent.
+  rpc GetAttachmentDownloadUrl(GetAttachmentDownloadUrlRequest) returns (GetAttachmentDownloadUrlResponse);
+
+  // ── Content + version history (requires space access) ──
+  // Current published content (empty when the page has no version yet) + whether the caller has a
+  // newer draft to restore.
+  rpc GetPageContent(GetPageContentRequest) returns (PageContent);
+  rpc ListPageVersions(ListPageVersionsRequest) returns (ListPageVersionsResponse); // metadata only, newest first
+  rpc GetPageVersion(GetPageVersionRequest) returns (PageVersion);                   // full content of one version
+
+  // ── Drafts (per-user autosave; never visible to anyone but the author) ──
+  rpc SaveDraft(SaveDraftRequest) returns (google.protobuf.Empty);
+  rpc GetMyDraft(GetMyDraftRequest) returns (PageDraft); // has_draft=false when there's nothing to restore
+  rpc ListMyDraftPages(ListMyDraftPagesRequest) returns (ListMyDraftPagesResponse); // pages the caller has an active draft on
+
+  // ── Single-editor edit lock (heartbeat-based; expiry checked at acquire time) ──
+  rpc AcquireEditLock(AcquireEditLockRequest) returns (EditLock);
+  rpc SendHeartbeat(SendHeartbeatRequest) returns (google.protobuf.Empty);
+  rpc ReleaseEditLock(ReleaseEditLockRequest) returns (google.protobuf.Empty);
+
+  // ── Publishing (requires holding the edit lock) ──
+  rpc PublishPage(PublishPageRequest) returns (PageVersion);              // new version, consume draft, release lock
+  rpc RestorePageVersion(RestorePageVersionRequest) returns (PageVersion); // new version from an old one's content
+
+  // ── Page restrictions (narrowing override; managed under the space-access gate) ──
+  rpc AddPageRestriction(AddPageRestrictionRequest) returns (google.protobuf.Empty);
+  rpc RemovePageRestriction(RemovePageRestrictionRequest) returns (google.protobuf.Empty);
+  rpc ListPageRestrictions(ListPageRestrictionsRequest) returns (ListPageRestrictionsResponse);
+
+  // ── Comments (page-level, one level of replies; require page access) ──
+  rpc CreateComment(CreateCommentRequest) returns (PageComment);
+  rpc EditComment(EditCommentRequest) returns (PageComment);       // author only
+  rpc DeleteComment(DeleteCommentRequest) returns (google.protobuf.Empty); // author only (soft delete)
+  rpc ListComments(ListCommentsRequest) returns (ListCommentsResponse);
+
+  // ── Task links (Doc side only — Task Service doesn't exist yet; task ids unvalidated cross-service) ──
+  rpc LinkTask(LinkTaskRequest) returns (google.protobuf.Empty);
+  rpc UnlinkTask(UnlinkTaskRequest) returns (google.protobuf.Empty);
+  rpc ListLinkedTasks(ListLinkedTasksRequest) returns (ListLinkedTasksResponse);
+
+  // Batched access filter for search: given candidate page ids, return the subset the caller can actually
+  // see (space access + page-level restrictions) — reuses PageAccessGuard.canAccess per id.
+  rpc FilterAccessiblePages(FilterAccessiblePagesRequest) returns (FilterAccessiblePagesResponse);
+  // Reciprocal (task-centric) direction: pages linked to a task, filtered to those requested_by can access.
+  rpc ListDocsLinkedToTask(ListDocsLinkedToTaskRequest) returns (ListDocsLinkedToTaskResponse);
+}
+
+message Space {
+  string id = 1;
+  string org_id = 2;
+  string key = 3;
+  string name = 4;
+  string description = 5;
+  string created_by = 6;
+  google.protobuf.Timestamp created_at = 7;
+  optional string icon = 8;              // emoji, ≤10 chars; absent = none
+  optional string homepage_page_id = 9;  // a page in this space; absent = no homepage set
+  google.protobuf.Timestamp deleted_at = 10; // absent = active; present = archived
+  bool can_manage = 11;                  // may the requesting user manage this space (creator or space admin)
+}
+
+message Page {
+  string id = 1;
+  string space_id = 2;
+  optional string parent_page_id = 3; // absent = top-level page
+  string title = 4;
+  double position = 5;                 // sort order within its parent (fractional; see MovePage)
+  optional string current_version_id = 6; // always null until the versioning step
+  string created_by = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  // Display-only flag: true when the page has ≥1 page_restrictions row. Computed (batched) on
+  // ListPagesInSpace so the tree can show a lock icon without an N+1 per-page check; other single-page
+  // responses leave it false (not computed there).
+  bool has_restrictions = 10;
+}
+
+// ===================== Spaces =====================
+
+message CreateSpaceRequest {
+  string requested_by = 1; // acting user (creator); must be an org member
+  string org_id = 2;
+  string key = 3;          // unique per org
+  string name = 4;
+  string description = 5;  // optional
+}
+
+message GetSpaceRequest {
+  string requested_by = 1;
+  string space_id = 2;
+}
+
+message ListMySpacesRequest {
+  string requested_by = 1;
+  string org_id = 2;
+  bool include_archived = 3; // default false = active spaces only (unchanged for existing callers)
+}
+
+message ListMySpacesResponse {
+  repeated Space spaces = 1;
+}
+
+message DeleteSpaceRequest {
+  string requested_by = 1;
+  string space_id = 2;
+}
+
+message UpdateSpaceRequest {
+  string requested_by = 1;
+  string space_id = 2;
+  // Partial update: each field is optional — absent = leave unchanged. A present empty description/icon
+  // clears it to null. (key is intentionally NOT updatable — it's embedded in every page URL.)
+  optional string name = 3;
+  optional string description = 4;
+  optional string icon = 5;
+}
+
+message RestoreSpaceRequest {
+  string requested_by = 1;
+  string space_id = 2;
+}
+
+message SetSpaceHomepageRequest {
+  string requested_by = 1;
+  string space_id = 2;
+  string page_id = 3; // a live page in this space; empty = clear the homepage
+}
+
+// ===================== Pages =====================
+
+message CreatePageRequest {
+  string requested_by = 1;
+  string space_id = 2;
+  optional string parent_page_id = 3; // absent = top-level page
+  string title = 4;
+}
+
+message GetPageRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ListPagesInSpaceRequest {
+  string requested_by = 1;
+  string space_id = 2;
+}
+
+message ListPagesInSpaceResponse {
+  // Flat list the frontend builds a tree from (matches how other list RPCs shape data). Ordered by
+  // parent, then ascending position — siblings are already in display order.
+  repeated Page pages = 1;
+}
+
+message RenamePageRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string new_title = 3;
+}
+
+message GetAttachmentDownloadUrlRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string file_id = 3;
+}
+
+message GetAttachmentDownloadUrlResponse {
+  string download_url = 1;
+  int32 expires_in_seconds = 2;
+}
+
+message MovePageRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  // Target parent. Absent = move to top level. Present (and different) = re-parent.
+  optional string new_parent_page_id = 3;
+  // Neighboring siblings to compute the new fractional position between (midpoint). Provide either,
+  // both, or neither (neither = append to the end of the target parent's children).
+  optional string after_page_id = 4;  // place immediately after this sibling
+  optional string before_page_id = 5; // place immediately before this sibling
+}
+
+message DeletePageRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+// ===================== Content, versions, drafts =====================
+
+message PageContent {
+  string page_id = 1;
+  bool has_content = 2;                     // false = page has never been published (no version yet)
+  optional string current_version_id = 3;
+  int32 current_version_number = 4;         // 0 when has_content=false
+  string content = 5;                       // published JSON content; empty when has_content=false
+  bool has_newer_draft = 6;                 // the caller has a draft newer than the current version
+}
+
+message PageVersion {
+  string id = 1;
+  string page_id = 2;
+  int32 version_number = 3;
+  string content = 4;                       // full JSON content
+  string created_by = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// Version list entry — metadata only, no content (fetch content via GetPageVersion).
+message PageVersionMeta {
+  string id = 1;
+  string page_id = 2;
+  int32 version_number = 3;
+  string created_by = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message PageDraft {
+  string page_id = 1;
+  bool has_draft = 2;                       // false = nothing to restore
+  string content = 3;                       // JSON; empty when has_draft=false
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message EditLock {
+  string page_id = 1;
+  string locked_by = 2;
+  google.protobuf.Timestamp locked_at = 3;
+  google.protobuf.Timestamp last_heartbeat_at = 4;
+}
+
+message GetPageContentRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ListPageVersionsRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ListPageVersionsResponse {
+  repeated PageVersionMeta versions = 1; // newest first (version_number DESC)
+}
+
+message GetPageVersionRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string version_id = 3;
+}
+
+message SaveDraftRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string content = 3;
+}
+
+message GetMyDraftRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ListMyDraftPagesRequest {
+  string requested_by = 1;
+  string org_id = 2;
+}
+
+message MyDraftPage {
+  string page_id = 1;
+  string title = 2;
+  string space_key = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message ListMyDraftPagesResponse {
+  repeated MyDraftPage pages = 1;
+}
+
+message AcquireEditLockRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message SendHeartbeatRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ReleaseEditLockRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message PublishPageRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string content = 3;
+}
+
+message RestorePageVersionRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string version_id = 3;
+}
+
+// ===================== Restrictions =====================
+
+message PageRestriction {
+  string page_id = 1;
+  string subject_type = 2; // USER | ROLE
+  string subject_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message AddPageRestrictionRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string subject_type = 3; // USER | ROLE
+  string subject_id = 4;
+}
+
+message RemovePageRestrictionRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string subject_type = 3;
+  string subject_id = 4;
+}
+
+message ListPageRestrictionsRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ListPageRestrictionsResponse {
+  repeated PageRestriction restrictions = 1;
+}
+
+// ===================== Comments =====================
+
+message PageComment {
+  string id = 1;
+  string page_id = 2;
+  string author_id = 3;
+  string content = 4;                          // JSON
+  optional string parent_comment_id = 5;       // set on a one-level reply; never points at another reply
+  google.protobuf.Timestamp created_at = 6;
+  optional google.protobuf.Timestamp edited_at = 7;
+  optional google.protobuf.Timestamp deleted_at = 8; // presence = soft-deleted tombstone
+}
+
+message CreateCommentRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string content = 3;
+  optional string parent_comment_id = 4;
+}
+
+message EditCommentRequest {
+  string requested_by = 1;
+  string comment_id = 2;
+  string content = 3;
+}
+
+message DeleteCommentRequest {
+  string requested_by = 1;
+  string comment_id = 2;
+}
+
+message ListCommentsRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ListCommentsResponse {
+  // Flat, chronological (created_at ASC); the caller groups one-level replies by parent_comment_id.
+  // Soft-deleted comments are included as tombstones so replies don't orphan.
+  repeated PageComment comments = 1;
+}
+
+// ===================== Task links =====================
+
+message LinkTaskRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string task_id = 3;
+}
+
+message UnlinkTaskRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  string task_id = 3;
+}
+
+message ListLinkedTasksRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message ListLinkedTasksResponse {
+  repeated string task_ids = 1; // ids only — no enrichment until Task Service exists
+}
+
+message FilterAccessiblePagesRequest {
+  repeated string page_ids = 1;
+  string requested_by = 2;
+}
+
+message FilterAccessiblePagesResponse {
+  repeated string page_ids = 1; // subset of the input the caller can access
+}
+
+message ListDocsLinkedToTaskRequest {
+  string requested_by = 1;
+  string task_id = 2;
+}
+
+message LinkedPageSummary {
+  string page_id = 1;
+  string title = 2;
+  string space_key = 3;
+}
+
+message ListDocsLinkedToTaskResponse {
+  repeated LinkedPageSummary pages = 1; // only pages requested_by can access
+}

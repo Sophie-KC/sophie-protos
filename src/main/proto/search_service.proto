@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package com.platform.search.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.searchservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "common/pagination.proto";
+
+service SearchService {
+  // Full-text search over indexed chat messages, scoped to org_id, then filtered down to only the
+  // conversations requested_by is currently a member of (a live membership check, never cached here).
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+
+  // Full-text search over indexed doc pages, scoped to org_id (and space_id if given), then filtered to
+  // only pages requested_by can access (live per-page check via Doc Service's FilterAccessiblePages).
+  rpc SearchPages(SearchPagesRequest) returns (SearchPagesResponse);
+}
+
+message SearchMessagesRequest {
+  string org_id = 1;
+  string query = 2;
+  string requested_by = 3;             // internal user id of the searching user
+  optional string conversation_id = 6; // present = scope to one conversation; absent = across all accessible
+  // Opaque cursor encodes the Lucene search-after position. Default direction FORWARD (relevance order).
+  .org.sophie.common.PageRequest page = 7;
+}
+
+message SearchMessagesResponse {
+  repeated SearchHit hits = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message SearchHit {
+  string message_id = 1;
+  string conversation_id = 2;
+  string sender_id = 3;
+  string snippet = 4;                       // truncated/plain-text excerpt for display
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message SearchPagesRequest {
+  string org_id = 1;
+  string query = 2;
+  string requested_by = 3;
+  optional string space_id = 4;  // present = scope to one space
+  .org.sophie.common.PageRequest page = 7;
+}
+
+message SearchPagesResponse {
+  repeated PageHit hits = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message PageHit {
+  string page_id = 1;
+  string space_key = 2;
+  string title = 3;
+  string snippet = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
