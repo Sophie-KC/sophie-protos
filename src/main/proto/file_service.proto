@@ -24,7 +24,7 @@ service FileService {
   rpc ConfirmUpload(ConfirmUploadRequest) returns (File);
   // Metadata only — never the bytes (see GetDownloadUrl for content access).
   rpc GetFile(GetFileRequest) returns (File);
-  // Links a file to an entity (MESSAGE | PAGE). Idempotent. Caller has already authorized the link.
+  // Links a file to an entity (MESSAGE | PAGE | APP_ICON). Idempotent. Caller has already authorized the link.
   rpc AttachFileReference(AttachFileReferenceRequest) returns (google.protobuf.Empty);
   // Short-lived presigned GET URL for an ACTIVE file. Caller has already authorized the access.
   rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
@@ -72,7 +72,7 @@ message GetFileRequest {
 
 message AttachFileReferenceRequest {
   string file_id = 1;
-  string entity_type = 2;   // MESSAGE | PAGE
+  string entity_type = 2;   // MESSAGE | PAGE | APP_ICON
   string entity_id = 3;
 }
 

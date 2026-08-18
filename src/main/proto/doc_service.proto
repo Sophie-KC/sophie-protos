@@ -376,6 +376,13 @@ message PageComment {
   google.protobuf.Timestamp created_at = 6;
   optional google.protobuf.Timestamp edited_at = 7;
   optional google.protobuf.Timestamp deleted_at = 8; // presence = soft-deleted tombstone
+  // Both opaque to this service (never parsed/validated here) and both absent on an ordinary page-level
+  // comment. anchor_mark_id groups every comment anchored to the same spot (count-chip UI). anchor_excerpt
+  // is the actual re-anchoring mechanism — the frontend searches the CURRENT document for this text at
+  // render time rather than trusting a stored position, since a raw offset breaks the instant content
+  // changes above it; if the text is gone, the comment falls back to page-level display.
+  optional string anchor_mark_id = 9;
+  optional string anchor_excerpt = 10;
 }
 
 message CreateCommentRequest {
@@ -383,6 +390,8 @@ message CreateCommentRequest {
   string page_id = 2;
   string content = 3;
   optional string parent_comment_id = 4;
+  optional string anchor_mark_id = 5;   // top-level comments only — a reply inherits its thread's anchor
+  optional string anchor_excerpt = 6;
 }
 
 message EditCommentRequest {

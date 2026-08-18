@@ -75,6 +75,30 @@ service OrgService {
 
   // Permission catalog — global, not org-scoped; no Org-Admin check (read-only reference data).
   rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
+
+  // Apps catalog — admin-curated launcher of internal/external tools. All mutating RPCs require
+  // requested_by_user_id to be the target org's Org Admin.
+  rpc CreateAppSection(CreateAppSectionRequest) returns (AppSection);
+  rpc RenameAppSection(RenameAppSectionRequest) returns (AppSection);
+  rpc ReorderAppSections(ReorderAppSectionsRequest) returns (ListAppSectionsResponse);
+  rpc DeleteAppSection(DeleteAppSectionRequest) returns (google.protobuf.Empty);
+  // Any org member may list sections — the catalog itself is member-readable, only curation is admin-gated.
+  rpc ListAppSections(ListAppSectionsRequest) returns (ListAppSectionsResponse);
+
+  rpc CreateApp(CreateAppRequest) returns (App);
+  rpc UpdateApp(UpdateAppRequest) returns (App);
+  rpc DeleteApp(DeleteAppRequest) returns (google.protobuf.Empty);
+  rpc ReorderApps(ReorderAppsRequest) returns (google.protobuf.Empty);
+  // Member-readable; results are filtered to apps visible to requested_by_user_id (EVERYONE, or
+  // RESTRICTED with a matching USER/ROLE subject) and each App carries that user's is_favorite.
+  rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+
+  // Self-service: any org member may favorite/unfavorite an app they can see.
+  rpc ToggleAppFavorite(ToggleAppFavoriteRequest) returns (google.protobuf.Empty);
+  // Presigned download URL for an app's uploaded icon (icon_type = UPLOAD). Routed through this RPC
+  // rather than a direct File Service passthrough — org-service is the access gate (the caller must
+  // be able to see the app), mirroring Doc/Chat Service's equivalent attachment-download-url pattern.
+  rpc GetAppIconDownloadUrl(GetAppIconDownloadUrlRequest) returns (GetAppIconDownloadUrlResponse);
 }
 
 message ValidateSessionRequest {
@@ -374,4 +398,172 @@ message ListPermissionsRequest {
 message ListPermissionsResponse {
   repeated PermissionItem permissions = 1;
   .org.sophie.common.PageResponse page = 2;
+}
+
+// ===================== Apps =====================
+// Org-curated launcher catalog (internal modules + external SaaS links). No SSO/credential storage —
+// tiles are plain links; visibility reuses the existing Role-as-pseudo-group pattern (see
+// AppVisibilitySubject) rather than a new group/team primitive, since none exists on the platform yet.
+
+message AppSection {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;
+  int32 position = 4;
+}
+
+message CreateAppSectionRequest {
+  string requested_by_user_id = 1;
+  string org_id = 2;
+  string name = 3;
+}
+
+message RenameAppSectionRequest {
+  string requested_by_user_id = 1;
+  string section_id = 2;
+  string name = 3;
+}
+
+message ReorderAppSectionsRequest {
+  string requested_by_user_id = 1;
+  string org_id = 2;
+  repeated string section_ids_in_order = 3; // must be exactly the org's current section id set
+}
+
+message DeleteAppSectionRequest {
+  string requested_by_user_id = 1;
+  string section_id = 2; // apps in this section become unsectioned (section_id cleared), not deleted
+}
+
+message ListAppSectionsRequest {
+  string requested_by_user_id = 1;
+  string org_id = 2;
+}
+
+message ListAppSectionsResponse {
+  repeated AppSection sections = 1;
+}
+
+// USER or ROLE (a role acting as a pseudo-group — see HasRoleAssignment above and Doc Service's
+// page_restrictions for the same pattern). Only meaningful when the owning App's visibility_type is
+// RESTRICTED; the visible set is the union of all of an app's subjects.
+message AppVisibilitySubject {
+  string subject_type = 1; // USER | ROLE
+  string subject_id = 2;
+}
+
+message App {
+  string id = 1;
+  string org_id = 2;
+  optional string section_id = 3;        // absent = unsectioned
+  string name = 4;
+  string url = 5;
+  optional string description = 6;
+  string icon_type = 7;                  // UPLOAD | FAVICON | LIBRARY | INITIAL
+  optional string icon_file_id = 8;      // set when icon_type = UPLOAD (File Service reference)
+  optional string icon_value = 9;        // FAVICON: source URL to derive the favicon from; LIBRARY: icon key
+  string open_behavior = 10;             // NEW_TAB | SAME_TAB
+  optional string health_check_url = 11; // schema only for now — no poller ships in this version
+  string visibility_type = 12;           // EVERYONE | RESTRICTED
+  repeated AppVisibilitySubject visibility_subjects = 13; // populated for Org Admin only (curation)
+  repeated string tags = 14;
+  int32 position = 15;
+  bool is_favorite = 16;                 // resolved for requested_by_user_id; only meaningful on ListApps
+  string created_by = 17;
+  google.protobuf.Timestamp created_at = 18;
+}
+
+message AppVisibilitySubjectList {
+  repeated AppVisibilitySubject subjects = 1;
+}
+
+message TagList {
+  repeated string tags = 1;
+}
+
+// Wraps a string so "clear this field" (present but empty) is distinguishable from "leave unchanged"
+// (absent) in UpdateAppRequest below — a plain `optional string` can't express that once the value
+// itself is legitimately allowed to be empty (e.g. clearing section_id to unsection an app).
+message OptionalString {
+  string value = 1;
+}
+
+message CreateAppRequest {
+  string requested_by_user_id = 1;
+  string org_id = 2;
+  string name = 3;
+  string url = 4;
+  optional string description = 5;
+  optional string section_id = 6;
+  string icon_type = 7;
+  optional string icon_file_id = 8;
+  optional string icon_value = 9;
+  string open_behavior = 10;
+  optional string health_check_url = 11;
+  string visibility_type = 12;
+  repeated AppVisibilitySubject visibility_subjects = 13;
+  repeated string tags = 14;
+}
+
+// Partial update: only fields actually set are changed. visibility_subjects/tags use list wrappers,
+// same as UpdateRoleRequest's PermissionKeys, for replace-the-whole-set presence semantics.
+message UpdateAppRequest {
+  string requested_by_user_id = 1;
+  string app_id = 2;
+  optional string name = 3;
+  optional string url = 4;
+  optional OptionalString description = 5;
+  optional OptionalString section_id = 6;
+  optional string icon_type = 7;
+  optional OptionalString icon_file_id = 8;
+  optional OptionalString icon_value = 9;
+  optional string open_behavior = 10;
+  optional OptionalString health_check_url = 11;
+  optional string visibility_type = 12;
+  optional AppVisibilitySubjectList visibility_subjects = 13;
+  optional TagList tags = 14;
+}
+
+message DeleteAppRequest {
+  string requested_by_user_id = 1;
+  string app_id = 2;
+}
+
+message SectionAppOrder {
+  optional string section_id = 1; // absent = the unsectioned bucket
+  repeated string app_ids_in_order = 2;
+}
+
+message ReorderAppsRequest {
+  string requested_by_user_id = 1;
+  string org_id = 2;
+  // One entry per section whose app order changed (including cross-section moves); each entry's list
+  // must be the complete, final app-id order for that section — handles a same-section reorder and a
+  // move-between-sections in a single call.
+  repeated SectionAppOrder sections = 3;
+}
+
+message ListAppsRequest {
+  string requested_by_user_id = 1;
+  string org_id = 2;
+}
+
+message ListAppsResponse {
+  repeated App apps = 1;
+}
+
+message ToggleAppFavoriteRequest {
+  string requested_by_user_id = 1;
+  string app_id = 2;
+  bool favorite = 3;
+}
+
+message GetAppIconDownloadUrlRequest {
+  string requested_by_user_id = 1;
+  string app_id = 2;
+}
+
+message GetAppIconDownloadUrlResponse {
+  string download_url = 1;
+  int32 expires_in_seconds = 2;
 }

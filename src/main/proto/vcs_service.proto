@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package com.platform.vcs.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.vcsservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// VCS (version control system) integration: per-org connections to an external provider (GitHub,
+// GitLab, ...) and provider-agnostic references (commits, branches, PRs, MRs) linked to a platform
+// entity (Task today; Doc is a reserved future entity_type). Stage 1: generic data model + read/manage
+// RPCs only. Provider-specific OAuth and webhook ingestion (Stage 2 GitHub, Stage 3 GitLab) populate
+// this data later — none of that lives here yet.
+service VcsService {
+  // Org admin only (IsOrgAdmin). Never returns the encrypted token fields — those never leave this
+  // service over the wire.
+  rpc ListVcsConnections(ListVcsConnectionsRequest) returns (ListVcsConnectionsResponse);
+  // Org admin only. Deletes the connection and (for FK integrity) every vcs_reference row it owns.
+  rpc DisconnectVcs(DisconnectVcsRequest) returns (google.protobuf.Empty);
+  // No permission check here — the caller (e.g. Task Service, itself called via the Gateway) is
+  // trusted to have already validated the user's access to the entity itself, same delegation pattern
+  // as Doc Service's page-task linking. requested_by is carried for parity/future audit use only.
+  rpc ListReferencesForEntity(ListReferencesForEntityRequest) returns (ListReferencesForEntityResponse);
+
+  // Org admin only. Returns the GitHub App's installation URL for the frontend to redirect the org
+  // admin's browser to. GitHub redirects back to vcs-service's own HTTP callback (not gRPC — see
+  // /integrations/github/callback) after the admin installs, carrying installation_id/setup_action/state.
+  rpc InitiateInstallation(InitiateInstallationRequest) returns (InitiateInstallationResponse);
+
+  // Org admin only. Returns GitLab's OAuth authorize URL, reusing the same signed single-use state-token
+  // mechanism as InitiateInstallation (state.provider = "GITLAB" instead of "GITHUB"). GitLab redirects
+  // back to /integrations/gitlab/callback (HTTP, not gRPC) carrying code + state.
+  rpc InitiateGitLabOAuth(InitiateGitLabOAuthRequest) returns (InitiateGitLabOAuthResponse);
+  // A GitLab account can belong to many groups — the callback can't pick one on its own, so it stops
+  // after token exchange + fetching the user's groups and hands back a short-lived selection_token (see
+  // vcs_gitlab_pending_selections) instead of a finished connection. This RPC is the follow-up call that
+  // finalizes it: re-checks org-admin status, creates the vcs_connections row with real encrypted
+  // tokens, lists the group's projects, and registers a webhook on each one. Org admin only.
+  rpc ConfirmGitLabGroupSelection(ConfirmGitLabGroupSelectionRequest) returns (VcsConnection);
+}
+
+message VcsConnection {
+  string id = 1;
+  string org_id = 2;
+  string provider = 3;                // GITHUB, GITLAB
+  string external_account_id = 4;
+  string external_account_name = 5;
+  string connected_by = 6;
+  google.protobuf.Timestamp connected_at = 7;
+  // access_token / refresh_token are intentionally NOT exposed here — encrypted at rest, never returned.
+  // True if GitLab's refresh-token exchange failed (revoked/expired beyond recovery) — webhooks for this
+  // connection will silently stop resolving new references until the org admin reconnects. Always false
+  // for GitHub (installation tokens are minted fresh per call, nothing to "expire" at the connection level).
+  bool needs_reconnect = 8;
+}
+
+message ListVcsConnectionsRequest {
+  string org_id = 1;
+  string requested_by = 2;
+}
+
+message ListVcsConnectionsResponse {
+  repeated VcsConnection connections = 1;
+}
+
+message DisconnectVcsRequest {
+  string connection_id = 1;
+  string requested_by = 2;
+}
+
+message VcsReference {
+  string id = 1;
+  string vcs_connection_id = 2;
+  string entity_type = 3;      // TASK (DOC reserved for a later stage)
+  string entity_id = 4;
+  string reference_type = 5;   // COMMIT, BRANCH, PULL_REQUEST, MERGE_REQUEST
+  string external_id = 6;      // commit SHA / PR-MR number / branch name
+  optional string title = 7;
+  string url = 8;
+  optional string state = 9;   // open/merged/closed; absent for commits
+  optional string author_external = 10;
+  google.protobuf.Timestamp occurred_at = 11;
+  google.protobuf.Timestamp created_at = 12;
+}
+
+message ListReferencesForEntityRequest {
+  string entity_type = 1;
+  string entity_id = 2;
+  string requested_by = 3;
+}
+
+message ListReferencesForEntityResponse {
+  repeated VcsReference references = 1;
+}
+
+message InitiateInstallationRequest {
+  string org_id = 1;
+  string requested_by = 2;
+  string provider = 3; // GITHUB only for now; GITLAB reserved for Stage 3
+}
+
+message InitiateInstallationResponse {
+  string installation_url = 1;
+}
+
+message InitiateGitLabOAuthRequest {
+  string org_id = 1;
+  string requested_by = 2;
+}
+
+message InitiateGitLabOAuthResponse {
+  string authorize_url = 1;
+}
+
+message ConfirmGitLabGroupSelectionRequest {
+  string selection_token = 1;
+  string requested_by = 2;
+  string group_id = 3; // one of the ids returned in the callback's group list
+}

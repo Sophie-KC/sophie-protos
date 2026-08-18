@@ -34,6 +34,7 @@ service TaskService {
   rpc ListWorkflowStatuses(ListWorkflowStatusesRequest) returns (ListWorkflowStatusesResponse); // project member
   rpc UpdateWorkflowStatus(UpdateWorkflowStatusRequest) returns (WorkflowStatus);          // project admin
   rpc DeleteWorkflowStatus(DeleteWorkflowStatusRequest) returns (google.protobuf.Empty);   // project admin
+  rpc ReorderWorkflowStatuses(ReorderWorkflowStatusesRequest) returns (ListWorkflowStatusesResponse); // project admin
   rpc CreateWorkflowTransition(CreateWorkflowTransitionRequest) returns (WorkflowTransition);   // project admin
   rpc ListWorkflowTransitions(ListWorkflowTransitionsRequest) returns (ListWorkflowTransitionsResponse); // project member
   rpc DeleteWorkflowTransition(DeleteWorkflowTransitionRequest) returns (google.protobuf.Empty); // project admin
@@ -56,6 +57,10 @@ service TaskService {
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);        // one query for board + list
   rpc BatchGetTaskSummaries(BatchGetTaskSummariesRequest) returns (BatchGetTaskSummariesResponse); // cross-link enrichment
   rpc GetTaskByReference(GetTaskByReferenceRequest) returns (TaskSummary);                          // resolve KEY-NUMBER → task
+  // Trusted-internal tier, same as Org Service's IsOrgMember/BatchGetUsers: no requested_by, no access
+  // check. orgId disambiguates the key directly. Reachable only from other backend services — VCS
+  // Service's webhook processing has no user in context to check access for.
+  rpc ResolveTaskReferenceInternal(ResolveTaskReferenceInternalRequest) returns (TaskSummary);
   rpc UpdateTask(UpdateTaskRequest) returns (Task);
   rpc ChangeTaskStatus(ChangeTaskStatusRequest) returns (Task);       // transition- + completion-validated
   rpc SetTaskParent(SetTaskParentRequest) returns (Task);             // one-level cap; null clears
@@ -215,6 +220,13 @@ message UpdateWorkflowStatusRequest {
 message DeleteWorkflowStatusRequest {
   string requested_by = 1;
   string status_id = 2;
+}
+
+message ReorderWorkflowStatusesRequest {
+  string requested_by = 1;
+  string project_id = 2;
+  // The full set of the project's status ids, in the desired board order.
+  repeated string status_ids = 3;
 }
 
 message CreateWorkflowTransitionRequest {
@@ -386,6 +398,12 @@ message BatchGetTaskSummariesResponse {
 // the lookup is scoped to the projects the caller can access.
 message GetTaskByReferenceRequest {
   string requested_by = 1;
+  string project_key = 2;
+  int32 task_number = 3;
+}
+
+message ResolveTaskReferenceInternalRequest {
+  string org_id = 1;
   string project_key = 2;
   int32 task_number = 3;
 }
