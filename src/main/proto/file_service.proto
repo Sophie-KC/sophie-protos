@@ -33,6 +33,9 @@ service FileService {
 message File {
   string id = 1;
   string org_id = 2;
+  // NOT a phase-2-spoofable identity field: File Service does no authorization with this value (it's
+  // SP-tier, no caller-identity gating by design) — it's audit data forwarded by the Gateway, which
+  // already resolved it from the verified uploader's session before calling here.
   string uploaded_by = 3;
   string storage_bucket = 4;
   string storage_key = 5;
@@ -48,7 +51,8 @@ message File {
 
 message RequestUploadRequest {
   string org_id = 1;
-  string uploaded_by = 2;   // internal user id of the uploader (this service does no identity lookup)
+  // NOT phase-2-spoofable: see File.uploaded_by above — File Service does no authz with it.
+  string uploaded_by = 2;
   string file_name = 3;
   string mime_type = 4;
   int64 size_bytes = 5;

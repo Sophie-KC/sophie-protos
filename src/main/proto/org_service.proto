@@ -145,12 +145,14 @@ message CreateOrgMemberRequest {
   string first_name = 3;
   string last_name = 4;
   string role_id = 5;      // must be an existing role in this org
-  string requested_by = 6; // caller's internal user id, for the admin-permission check
+  reserved 6; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message ListOrgMembersRequest {
   string org_id = 1;
-  string requested_by = 2; // for the admin-permission check
+  reserved 2; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message OrgMember {
@@ -171,7 +173,8 @@ message ListOrgMembersResponse {
 message SearchOrgMembersRequest {
   string org_id = 1;
   string query = 2;        // free-text, matched against name/email
-  string requested_by = 3; // caller's internal user id
+  reserved 3; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message SearchOrgMembersResponse {
@@ -279,14 +282,16 @@ message OrganizationMembership {
 
 message UpdateOrganizationRequest {
   string org_id = 1;
-  string requested_by_user_id = 2; // org-service internal user id; must be this org's Org Admin
+  reserved 2; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   optional string name = 3;        // partial update: only fields actually set are changed
   optional string subdomain = 4;
 }
 
 message UpdateOrganizationStatusRequest {
   string org_id = 1;
-  string requested_by_user_id = 2; // org-service internal user id; must be this org's Org Admin
+  reserved 2; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string status = 3;               // ACTIVE, SUSPENDED, ARCHIVED — ARCHIVED is the "delete"
 }
 
@@ -323,7 +328,8 @@ message PermissionKeys {
 }
 
 message CreateRoleRequest {
-  string requested_by_user_id = 1; // must be org_id's Org Admin
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
   string name = 3;
   string description = 4;
@@ -332,7 +338,8 @@ message CreateRoleRequest {
 }
 
 message UpdateRoleRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string role_id = 2;
   optional string name = 3;
   optional string description = 4;
@@ -340,12 +347,14 @@ message UpdateRoleRequest {
 }
 
 message DeleteRoleRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string role_id = 2;
 }
 
 message ListRolesRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
   optional string scope_type = 3;  // optional filter
 }
@@ -355,7 +364,8 @@ message ListRolesResponse {
 }
 
 message AssignRoleRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string user_id = 2;              // target org member being assigned the role
   string role_id = 3;
   string scope_type = 4;           // must equal the role's scope_type
@@ -363,12 +373,14 @@ message AssignRoleRequest {
 }
 
 message RevokeRoleAssignmentRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string assignment_id = 2;
 }
 
 message ListRoleAssignmentsRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   // Query mode A: by scope. Query mode B: by user within an org.
   optional string scope_type = 2;
   optional string scope_id = 3;
@@ -413,30 +425,35 @@ message AppSection {
 }
 
 message CreateAppSectionRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
   string name = 3;
 }
 
 message RenameAppSectionRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string section_id = 2;
   string name = 3;
 }
 
 message ReorderAppSectionsRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
   repeated string section_ids_in_order = 3; // must be exactly the org's current section id set
 }
 
 message DeleteAppSectionRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string section_id = 2; // apps in this section become unsectioned (section_id cleared), not deleted
 }
 
 message ListAppSectionsRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
 }
 
@@ -489,7 +506,8 @@ message OptionalString {
 }
 
 message CreateAppRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
   string name = 3;
   string url = 4;
@@ -508,7 +526,8 @@ message CreateAppRequest {
 // Partial update: only fields actually set are changed. visibility_subjects/tags use list wrappers,
 // same as UpdateRoleRequest's PermissionKeys, for replace-the-whole-set presence semantics.
 message UpdateAppRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string app_id = 2;
   optional string name = 3;
   optional string url = 4;
@@ -525,7 +544,8 @@ message UpdateAppRequest {
 }
 
 message DeleteAppRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string app_id = 2;
 }
 
@@ -535,7 +555,8 @@ message SectionAppOrder {
 }
 
 message ReorderAppsRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
   // One entry per section whose app order changed (including cross-section moves); each entry's list
   // must be the complete, final app-id order for that section — handles a same-section reorder and a
@@ -544,7 +565,8 @@ message ReorderAppsRequest {
 }
 
 message ListAppsRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string org_id = 2;
 }
 
@@ -553,13 +575,15 @@ message ListAppsResponse {
 }
 
 message ToggleAppFavoriteRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string app_id = 2;
   bool favorite = 3;
 }
 
 message GetAppIconDownloadUrlRequest {
-  string requested_by_user_id = 1;
+  reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
+  reserved "requested_by_user_id";
   string app_id = 2;
 }
 

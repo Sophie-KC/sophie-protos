@@ -58,7 +58,8 @@ message VcsConnection {
 
 message ListVcsConnectionsRequest {
   string org_id = 1;
-  string requested_by = 2;
+  reserved 2; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message ListVcsConnectionsResponse {
@@ -67,7 +68,8 @@ message ListVcsConnectionsResponse {
 
 message DisconnectVcsRequest {
   string connection_id = 1;
-  string requested_by = 2;
+  reserved 2; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message VcsReference {
@@ -88,7 +90,8 @@ message VcsReference {
 message ListReferencesForEntityRequest {
   string entity_type = 1;
   string entity_id = 2;
-  string requested_by = 3;
+  reserved 3; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message ListReferencesForEntityResponse {
@@ -97,7 +100,8 @@ message ListReferencesForEntityResponse {
 
 message InitiateInstallationRequest {
   string org_id = 1;
-  string requested_by = 2;
+  reserved 2; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string provider = 3; // GITHUB only for now; GITLAB reserved for Stage 3
 }
 
@@ -107,7 +111,8 @@ message InitiateInstallationResponse {
 
 message InitiateGitLabOAuthRequest {
   string org_id = 1;
-  string requested_by = 2;
+  reserved 2; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message InitiateGitLabOAuthResponse {
@@ -116,6 +121,7 @@ message InitiateGitLabOAuthResponse {
 
 message ConfirmGitLabGroupSelectionRequest {
   string selection_token = 1;
-  string requested_by = 2;
+  reserved 2; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string group_id = 3; // one of the ids returned in the callback's group list
 }

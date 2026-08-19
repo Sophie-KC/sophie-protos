@@ -75,6 +75,13 @@ service DocService {
   rpc FilterAccessiblePages(FilterAccessiblePagesRequest) returns (FilterAccessiblePagesResponse);
   // Reciprocal (task-centric) direction: pages linked to a task, filtered to those requested_by can access.
   rpc ListDocsLinkedToTask(ListDocsLinkedToTaskRequest) returns (ListDocsLinkedToTaskResponse);
+
+  // ── Realtime collab checkpoint (websocket-service only) ──
+  // Was referenced by websocket-service's client code with no corresponding RPC ever defined here —
+  // a pre-existing gap unrelated to phase-2, added now to unblock the build. In-memory on Doc Service's
+  // side for now (see PageCollabStateService); a real persistence layer is a separate follow-up.
+  rpc GetCollabState(GetCollabStateRequest) returns (CollabState);
+  rpc SaveCollabState(SaveCollabStateRequest) returns (google.protobuf.Empty);
 }
 
 message Space {
@@ -110,7 +117,8 @@ message Page {
 // ===================== Spaces =====================
 
 message CreateSpaceRequest {
-  string requested_by = 1; // acting user (creator); must be an org member
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string org_id = 2;
   string key = 3;          // unique per org
   string name = 4;
@@ -118,12 +126,14 @@ message CreateSpaceRequest {
 }
 
 message GetSpaceRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string space_id = 2;
 }
 
 message ListMySpacesRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string org_id = 2;
   bool include_archived = 3; // default false = active spaces only (unchanged for existing callers)
 }
@@ -133,12 +143,14 @@ message ListMySpacesResponse {
 }
 
 message DeleteSpaceRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string space_id = 2;
 }
 
 message UpdateSpaceRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string space_id = 2;
   // Partial update: each field is optional — absent = leave unchanged. A present empty description/icon
   // clears it to null. (key is intentionally NOT updatable — it's embedded in every page URL.)
@@ -148,12 +160,14 @@ message UpdateSpaceRequest {
 }
 
 message RestoreSpaceRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string space_id = 2;
 }
 
 message SetSpaceHomepageRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string space_id = 2;
   string page_id = 3; // a live page in this space; empty = clear the homepage
 }
@@ -161,19 +175,22 @@ message SetSpaceHomepageRequest {
 // ===================== Pages =====================
 
 message CreatePageRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string space_id = 2;
   optional string parent_page_id = 3; // absent = top-level page
   string title = 4;
 }
 
 message GetPageRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
 message ListPagesInSpaceRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string space_id = 2;
 }
 
@@ -184,13 +201,15 @@ message ListPagesInSpaceResponse {
 }
 
 message RenamePageRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string new_title = 3;
 }
 
 message GetAttachmentDownloadUrlRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string file_id = 3;
 }
@@ -201,7 +220,8 @@ message GetAttachmentDownloadUrlResponse {
 }
 
 message MovePageRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   // Target parent. Absent = move to top level. Present (and different) = re-parent.
   optional string new_parent_page_id = 3;
@@ -212,7 +232,8 @@ message MovePageRequest {
 }
 
 message DeletePageRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
@@ -260,12 +281,14 @@ message EditLock {
 }
 
 message GetPageContentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
 message ListPageVersionsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
@@ -274,24 +297,28 @@ message ListPageVersionsResponse {
 }
 
 message GetPageVersionRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string version_id = 3;
 }
 
 message SaveDraftRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string content = 3;
 }
 
 message GetMyDraftRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
 message ListMyDraftPagesRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string org_id = 2;
 }
 
@@ -307,28 +334,33 @@ message ListMyDraftPagesResponse {
 }
 
 message AcquireEditLockRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
 message SendHeartbeatRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
 message ReleaseEditLockRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
 message PublishPageRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string content = 3;
 }
 
 message RestorePageVersionRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string version_id = 3;
 }
@@ -343,21 +375,24 @@ message PageRestriction {
 }
 
 message AddPageRestrictionRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string subject_type = 3; // USER | ROLE
   string subject_id = 4;
 }
 
 message RemovePageRestrictionRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string subject_type = 3;
   string subject_id = 4;
 }
 
 message ListPageRestrictionsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
@@ -386,7 +421,8 @@ message PageComment {
 }
 
 message CreateCommentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string content = 3;
   optional string parent_comment_id = 4;
@@ -395,18 +431,21 @@ message CreateCommentRequest {
 }
 
 message EditCommentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string comment_id = 2;
   string content = 3;
 }
 
 message DeleteCommentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string comment_id = 2;
 }
 
 message ListCommentsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
@@ -419,19 +458,22 @@ message ListCommentsResponse {
 // ===================== Task links =====================
 
 message LinkTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string task_id = 3;
 }
 
 message UnlinkTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
   string task_id = 3;
 }
 
 message ListLinkedTasksRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string page_id = 2;
 }
 
@@ -441,7 +483,8 @@ message ListLinkedTasksResponse {
 
 message FilterAccessiblePagesRequest {
   repeated string page_ids = 1;
-  string requested_by = 2;
+  reserved 2; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message FilterAccessiblePagesResponse {
@@ -449,7 +492,8 @@ message FilterAccessiblePagesResponse {
 }
 
 message ListDocsLinkedToTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
 }
 
@@ -461,4 +505,18 @@ message LinkedPageSummary {
 
 message ListDocsLinkedToTaskResponse {
   repeated LinkedPageSummary pages = 1; // only pages requested_by can access
+}
+
+message GetCollabStateRequest {
+  string page_id = 1;
+}
+
+message SaveCollabStateRequest {
+  string page_id = 1;
+  bytes state = 2;
+}
+
+message CollabState {
+  bool has_state = 1;
+  bytes state = 2;
 }

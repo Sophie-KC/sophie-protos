@@ -290,7 +290,8 @@ message RemoveReactionRequest {
 message GetAttachmentDownloadUrlRequest {
   string message_id = 1;
   string file_id = 2;
-  string requested_by = 3; // internal user id of the caller (Gateway forwards x-user-id)
+  reserved 3; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
 }
 
 message GetAttachmentDownloadUrlResponse {

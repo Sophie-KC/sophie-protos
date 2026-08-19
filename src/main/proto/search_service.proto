@@ -21,7 +21,8 @@ service SearchService {
 message SearchMessagesRequest {
   string org_id = 1;
   string query = 2;
-  string requested_by = 3;             // internal user id of the searching user
+  reserved 3; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   optional string conversation_id = 6; // present = scope to one conversation; absent = across all accessible
   // Opaque cursor encodes the Lucene search-after position. Default direction FORWARD (relevance order).
   .org.sophie.common.PageRequest page = 7;
@@ -43,7 +44,8 @@ message SearchHit {
 message SearchPagesRequest {
   string org_id = 1;
   string query = 2;
-  string requested_by = 3;
+  reserved 3; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   optional string space_id = 4;  // present = scope to one space
   .org.sophie.common.PageRequest page = 7;
 }

@@ -134,7 +134,8 @@ message WorkflowTransition {
 // ── Projects ──
 
 message CreateProjectRequest {
-  string requested_by = 1; // acting user (creator); must be an org member
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string org_id = 2;
   string key = 3;          // unique per org
   string name = 4;
@@ -142,12 +143,14 @@ message CreateProjectRequest {
 }
 
 message GetProjectRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
 }
 
 message ListMyProjectsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string org_id = 2;
 }
 
@@ -156,21 +159,24 @@ message ListMyProjectsResponse {
 }
 
 message DeleteProjectRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
 }
 
 // ── Task Types ──
 
 message CreateTaskTypeRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string org_id = 2;
   string name = 3;
   string icon = 4; // optional
 }
 
 message ListTaskTypesRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string org_id = 2;
 }
 
@@ -179,21 +185,24 @@ message ListTaskTypesResponse {
 }
 
 message UpdateTaskTypeRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_type_id = 2;
   optional string name = 3; // partial: absent = unchanged
   optional string icon = 4; // partial: present-empty clears
 }
 
 message DeleteTaskTypeRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_type_id = 2;
 }
 
 // ── Workflow ──
 
 message CreateWorkflowStatusRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   string name = 3;
   int32 order_index = 4;
@@ -201,7 +210,8 @@ message CreateWorkflowStatusRequest {
 }
 
 message ListWorkflowStatusesRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
 }
 
@@ -210,7 +220,8 @@ message ListWorkflowStatusesResponse {
 }
 
 message UpdateWorkflowStatusRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string status_id = 2;
   optional string name = 3;
   optional int32 order_index = 4;
@@ -218,26 +229,30 @@ message UpdateWorkflowStatusRequest {
 }
 
 message DeleteWorkflowStatusRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string status_id = 2;
 }
 
 message ReorderWorkflowStatusesRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   // The full set of the project's status ids, in the desired board order.
   repeated string status_ids = 3;
 }
 
 message CreateWorkflowTransitionRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   string from_status_id = 3;
   string to_status_id = 4;
 }
 
 message ListWorkflowTransitionsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
 }
 
@@ -246,7 +261,8 @@ message ListWorkflowTransitionsResponse {
 }
 
 message DeleteWorkflowTransitionRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string transition_id = 2;
 }
 
@@ -262,14 +278,16 @@ message Board {
 }
 
 message CreateBoardRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   string name = 3;
   string default_filter = 4; // optional; defaults to "{}"
 }
 
 message ListBoardsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
 }
 
@@ -278,7 +296,8 @@ message ListBoardsResponse {
 }
 
 message UpdateBoardRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string board_id = 2;
   optional string name = 3;
   optional string default_filter = 4;
@@ -286,7 +305,8 @@ message UpdateBoardRequest {
 }
 
 message DeleteBoardRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string board_id = 2;
 }
 
@@ -300,14 +320,16 @@ message Label {
 }
 
 message CreateLabelRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   string name = 3;
   string color = 4; // optional
 }
 
 message ListLabelsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
 }
 
@@ -316,14 +338,16 @@ message ListLabelsResponse {
 }
 
 message UpdateLabelRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string label_id = 2;
   optional string name = 3;
   optional string color = 4;
 }
 
 message DeleteLabelRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string label_id = 2;
 }
 
@@ -362,7 +386,8 @@ message TaskSummary {
 }
 
 message CreateTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   string task_type_id = 3;
   string title = 4;
@@ -378,7 +403,8 @@ message CreateTaskRequest {
 }
 
 message GetTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
 }
 
@@ -386,7 +412,8 @@ message GetTaskRequest {
 // Org Service's BatchGetUsers: returns a summary for each id that exists (missing/deleted ids are simply
 // omitted), no per-task access filtering beyond being a normal authenticated caller.
 message BatchGetTaskSummariesRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   repeated string task_ids = 2;
 }
 
@@ -397,7 +424,8 @@ message BatchGetTaskSummariesResponse {
 // Resolve a human task reference (projectKey-taskNumber) to a task. projectKey is unique only per org, so
 // the lookup is scoped to the projects the caller can access.
 message GetTaskByReferenceRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_key = 2;
   int32 task_number = 3;
 }
@@ -419,7 +447,8 @@ message TaskSummaryDetail {
 }
 
 message ListTasksRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   // Filters (all optional) — the same set serves board and list views.
   repeated string label_ids = 3;
@@ -438,7 +467,8 @@ message ListTasksResponse {
 }
 
 message UpdateTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   optional string title = 3;
   optional string description = 4;
@@ -450,25 +480,29 @@ message UpdateTaskRequest {
 }
 
 message ChangeTaskStatusRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   string new_status_id = 3;
 }
 
 message SetTaskParentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   optional string parent_task_id = 3; // absent/empty = clear (un-nest)
 }
 
 message SetTaskEpicRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   optional string epic_id = 3; // absent/empty = remove from its epic
 }
 
 message DeleteTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
 }
 
@@ -486,25 +520,29 @@ message TaskComment {
 }
 
 message CreateTaskCommentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   string content = 3;
   optional string parent_comment_id = 4; // absent = top-level; a reply-to-a-reply is rejected
 }
 
 message EditTaskCommentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string comment_id = 2;
   string content = 3;
 }
 
 message DeleteTaskCommentRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string comment_id = 2;
 }
 
 message ListTaskCommentsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
 }
 
@@ -523,7 +561,8 @@ message TaskActivityEntry {
 }
 
 message ListTaskActivityRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
 }
 
@@ -534,7 +573,8 @@ message ListTaskActivityResponse {
 // Manual backlog reorder: place task_id between previous_task_id and next_task_id (either may be absent
 // to move to an end). Both absent = move to the bottom of the backlog.
 message RankTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   optional string previous_task_id = 3; // the task that should sit directly ABOVE this one
   optional string next_task_id = 4;     // the task that should sit directly BELOW this one
@@ -556,7 +596,8 @@ message Sprint {
 }
 
 message CreateSprintRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
   string name = 3;
   optional string goal = 4;
@@ -565,7 +606,8 @@ message CreateSprintRequest {
 }
 
 message UpdateSprintRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string sprint_id = 2;
   optional string name = 3;
   optional string goal = 4;
@@ -574,7 +616,8 @@ message UpdateSprintRequest {
 }
 
 message ListSprintsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string project_id = 2;
 }
 
@@ -583,52 +626,61 @@ message ListSprintsResponse {
 }
 
 message StartSprintRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string sprint_id = 2;
 }
 
 message CompleteSprintRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string sprint_id = 2;
   optional string target_sprint_id = 3; // carry survivors here; absent = backlog
 }
 
 message DeleteSprintRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string sprint_id = 2;
 }
 
 message ReopenSprintRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string sprint_id = 2;
 }
 
 message MoveTaskToSprintRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   optional string sprint_id = 3; // absent/empty = move to backlog
 }
 
 message AddTaskLabelRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   string label_id = 3;
 }
 
 message RemoveTaskLabelRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   string label_id = 3;
 }
 
 message BlockTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string blocking_task_id = 2;
   string blocked_task_id = 3;
 }
 
 message UnblockTaskRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string blocking_task_id = 2;
   string blocked_task_id = 3;
 }
@@ -636,19 +688,22 @@ message UnblockTaskRequest {
 // ===================== Task ↔ Doc linking =====================
 
 message LinkDocRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   string doc_page_id = 3;
 }
 
 message UnlinkDocRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
   string doc_page_id = 3;
 }
 
 message ListLinkedDocsRequest {
-  string requested_by = 1;
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
   string task_id = 2;
 }
 
