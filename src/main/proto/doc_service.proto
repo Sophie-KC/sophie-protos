@@ -85,13 +85,6 @@ service DocService {
   rpc FilterAccessiblePages(FilterAccessiblePagesRequest) returns (FilterAccessiblePagesResponse);
   // Reciprocal (task-centric) direction: pages linked to a task, filtered to those requested_by can access.
   rpc ListDocsLinkedToTask(ListDocsLinkedToTaskRequest) returns (ListDocsLinkedToTaskResponse);
-
-  // ── Realtime collab checkpoint (websocket-service only) ──
-  // Was referenced by websocket-service's client code with no corresponding RPC ever defined here —
-  // a pre-existing gap unrelated to phase-2, added now to unblock the build. In-memory on Doc Service's
-  // side for now (see PageCollabStateService); a real persistence layer is a separate follow-up.
-  rpc GetCollabState(GetCollabStateRequest) returns (CollabState);
-  rpc SaveCollabState(SaveCollabStateRequest) returns (google.protobuf.Empty);
 }
 
 message Space {
@@ -291,12 +284,15 @@ message EditLock {
 }
 
 message CheckPageAccessRequest {
-  string requested_by = 1;
+  // Not a client-supplied identity field (phase 2): identity comes from the verified principal.
+  reserved 1;
+  reserved "requested_by";
   string page_id = 2;
 }
 
 message GetCollabStateRequest {
-  string requested_by = 1;
+  reserved 1;
+  reserved "requested_by";
   string page_id = 2;
 }
 
@@ -308,7 +304,8 @@ message CollabState {
 }
 
 message SaveCollabStateRequest {
-  string requested_by = 1;
+  reserved 1;
+  reserved "requested_by";
   string page_id = 2;
   bytes state = 3;
 }
@@ -538,18 +535,4 @@ message LinkedPageSummary {
 
 message ListDocsLinkedToTaskResponse {
   repeated LinkedPageSummary pages = 1; // only pages requested_by can access
-}
-
-message GetCollabStateRequest {
-  string page_id = 1;
-}
-
-message SaveCollabStateRequest {
-  string page_id = 1;
-  bytes state = 2;
-}
-
-message CollabState {
-  bool has_state = 1;
-  bytes state = 2;
 }
