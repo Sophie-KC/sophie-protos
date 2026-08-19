@@ -50,6 +50,16 @@ service DocService {
   rpc SendHeartbeat(SendHeartbeatRequest) returns (google.protobuf.Empty);
   rpc ReleaseEditLock(ReleaseEditLockRequest) returns (google.protobuf.Empty);
 
+  // ── Real-time collaborative editing (Yjs) — Phase 1, additive alongside the edit lock above.
+  // The stored state is an opaque Yjs binary blob Doc Service never interprets, same treatment as
+  // page content's JSON string. Persistence/access-gating only; the actual CRDT relay lives in
+  // websocket-service, which calls these two RPCs. ──
+  // Content-free access probe (vs. reusing GetPageContent, which would transfer/discard content
+  // just to check access) — used by api-gateway before minting a page-scoped collab WS ticket.
+  rpc CheckPageAccess(CheckPageAccessRequest) returns (google.protobuf.Empty);
+  rpc GetCollabState(GetCollabStateRequest) returns (CollabState);   // has_state=false if never checkpointed
+  rpc SaveCollabState(SaveCollabStateRequest) returns (google.protobuf.Empty);
+
   // ── Publishing (requires holding the edit lock) ──
   rpc PublishPage(PublishPageRequest) returns (PageVersion);              // new version, consume draft, release lock
   rpc RestorePageVersion(RestorePageVersionRequest) returns (PageVersion); // new version from an old one's content
@@ -257,6 +267,29 @@ message EditLock {
   string locked_by = 2;
   google.protobuf.Timestamp locked_at = 3;
   google.protobuf.Timestamp last_heartbeat_at = 4;
+}
+
+message CheckPageAccessRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message GetCollabStateRequest {
+  string requested_by = 1;
+  string page_id = 2;
+}
+
+message CollabState {
+  string page_id = 1;
+  bool has_state = 2;
+  bytes state = 3;                          // opaque Yjs binary state; empty when has_state=false
+  google.protobuf.Timestamp updated_at = 4;  // absent when has_state=false
+}
+
+message SaveCollabStateRequest {
+  string requested_by = 1;
+  string page_id = 2;
+  bytes state = 3;
 }
 
 message GetPageContentRequest {
