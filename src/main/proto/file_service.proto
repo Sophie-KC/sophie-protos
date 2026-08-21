@@ -28,6 +28,18 @@ service FileService {
   rpc AttachFileReference(AttachFileReferenceRequest) returns (google.protobuf.Empty);
   // Short-lived presigned GET URL for an ACTIVE file. Caller has already authorized the access.
   rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
+
+  // Wholesale replace of every reference row for one (owner_type, owner_id): rows for file_ids not in
+  // the given set are deleted, rows for file_ids not yet present are inserted. Idempotent — re-sending
+  // the same set is a no-op. Empty file_ids revokes every reference this owner holds. Drives the
+  // unreferenced_since bookkeeping (set on drop-to-zero, cleared on any new reference) in the same
+  // transaction as the reference write — the sweeper never recomputes it.
+  rpc ReplaceReferences(ReplaceReferencesRequest) returns (google.protobuf.Empty);
+  // Convenience for ReplaceReferences with an empty file_ids set.
+  rpc RevokeOwner(RevokeOwnerRequest) returns (google.protobuf.Empty);
+  // Debug/admin: how many owners currently reference a file. Not used by the GC sweeper itself (which
+  // re-checks inside its own delete transaction).
+  rpc GetReferenceCount(GetReferenceCountRequest) returns (GetReferenceCountResponse);
 }
 
 message File {
@@ -82,9 +94,34 @@ message AttachFileReferenceRequest {
 
 message GetDownloadUrlRequest {
   string file_id = 1;
+  // false (default) = presigned URL forces Content-Disposition: attachment, safe for any content
+  // type including SVG/HTML. true = no override, letting the browser render supported types inline —
+  // callers must only set this for a content-type allowlist they've verified is safe to render
+  // (e.g. doc-service's image embeds), never for a generic file attachment.
+  bool inline = 2;
 }
 
 message GetDownloadUrlResponse {
   string download_url = 1;
   int32 expires_in_seconds = 2;
+}
+
+message ReplaceReferencesRequest {
+  string org_id = 1;
+  string owner_type = 2;   // DOC_PAGE_VERSION | DOC_PAGE_DRAFT | DOC_PAGE_SHELF | MESSAGE | APP_ICON
+  string owner_id = 3;
+  repeated string file_ids = 4;
+}
+
+message RevokeOwnerRequest {
+  string owner_type = 1;
+  string owner_id = 2;
+}
+
+message GetReferenceCountRequest {
+  string file_id = 1;
+}
+
+message GetReferenceCountResponse {
+  int32 count = 1;
 }
