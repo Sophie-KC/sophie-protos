@@ -42,6 +42,12 @@ service CalendarService {
 
   rpc RespondToInvite     (RespondToInviteRequest)     returns (google.protobuf.Empty);
   rpc SetReminders        (SetRemindersRequest)        returns (google.protobuf.Empty);
+
+  // Dry run: the repeat control's echo box needs an occurrence count before the user saves, and it
+  // must never be able to disagree with what a save would actually produce. Calls the exact same
+  // RecurrenceService.validate + expand the write path calls — not a parallel implementation. No
+  // side effects; read-only.
+  rpc PreviewRecurrence   (PreviewRecurrenceRequest)   returns (PreviewRecurrenceResponse);
 }
 
 // ===================== Settings =====================
@@ -112,6 +118,8 @@ message EventView {
   string organizer_user_id        = 18;
   string my_response              = 19; // NEEDS_ACTION | ACCEPTED | DECLINED | TENTATIVE
   int32  attendee_count           = 20;
+  // Set only when is_recurring — the expiry banner needs this without a second request per event.
+  google.protobuf.Timestamp series_ends_at = 21;
 }
 
 message GetEventDetailRequest {
@@ -294,4 +302,23 @@ message RespondToInviteRequest {
 message SetRemindersRequest {
   string event_id                 = 1;
   repeated ReminderInput reminders = 2; // replaces the caller's reminders wholesale for this event
+}
+
+// ===================== Recurrence preview =====================
+
+message PreviewRecurrenceRequest {
+  string rrule           = 1;
+  string start_local     = 2; // 'YYYY-MM-DDTHH:mm:ss'
+  string timezone        = 3; // IANA
+  string series_end_date = 4; // 'YYYY-MM-DD'
+}
+
+message PreviewRecurrenceResponse {
+  bool   valid                  = 1;
+  int32  occurrence_count       = 2;
+  string first_occurrence_local = 3;
+  string last_occurrence_local  = 4;
+  // UNTIL_REQUIRED | UNPARSEABLE | UNTIL_BEFORE_FROM | SPAN_TOO_LONG | TOO_MANY_OCCURRENCES
+  string error_code             = 5;
+  int32  limit_value            = 6; // the N in "over the 5,000 limit", for the message
 }
