@@ -1,0 +1,297 @@
+syntax = "proto3";
+
+package com.platform.calendar.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.calendarservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Calendar: events, recurrence, attendees, reminders, free/busy. Central Asia region only — no DST in
+// any covered country, so there is no gap/fold handling anywhere in this model. There is no Calendar
+// entity: an event belongs to its organizer directly. Every series is bounded (UNTIL or COUNT
+// required) — there is no infinite-recurrence representation. Identity of the caller comes from the
+// validated session (SophieSecurityContext), never from a request field; org_id is still explicit on
+// requests that need org scoping, since a user may belong to more than one org and the security
+// context carries no org claim.
+service CalendarService {
+  rpc GetSettings         (GetSettingsRequest)         returns (SettingsView);
+  rpc UpdateUserSettings  (UpdateUserSettingsRequest)  returns (SettingsView);
+  rpc UpdateOrgSettings   (UpdateOrgSettingsRequest)   returns (SettingsView);
+
+  // Grid read. Returns events the caller organizes UNION events the caller is invited to — an
+  // attendee-only read that omits the invited branch shows invitees nothing at all.
+  rpc GetEvents           (GetEventsRequest)           returns (GetEventsResponse);
+  rpc GetEventDetail      (GetEventDetailRequest)      returns (EventDetailView);
+
+  // Cross-user read. Intervals only — never a title, regardless of caller's relationship to the event.
+  rpc GetFreeBusy         (GetFreeBusyRequest)         returns (GetFreeBusyResponse);
+  rpc SuggestTimes        (SuggestTimesRequest)        returns (SuggestTimesResponse);
+
+  rpc CreateEvent         (CreateEventRequest)         returns (EventDetailView);
+  // Carries the full representation, not a patch (consistent with the Apps module). Attendee and
+  // reminder lists are replaced wholesale. scope is REQUIRED (rejected as UNSPECIFIED) whenever the
+  // target event is recurring.
+  rpc UpdateEvent         (UpdateEventRequest)         returns (EventDetailView);
+  rpc DeleteEvent         (DeleteEventRequest)         returns (google.protobuf.Empty);
+
+  // Sets a later UNTIL and materializes only the newly-reachable occurrences (ON CONFLICT DO NOTHING) —
+  // existing overrides and cancellations are untouched.
+  rpc ExtendSeries        (ExtendSeriesRequest)        returns (EventDetailView);
+
+  rpc RespondToInvite     (RespondToInviteRequest)     returns (google.protobuf.Empty);
+  rpc SetReminders        (SetRemindersRequest)        returns (google.protobuf.Empty);
+}
+
+// ===================== Settings =====================
+
+message GetSettingsRequest {
+  string org_id = 1;
+}
+
+message UpdateUserSettingsRequest {
+  string org_id = 1;
+  optional int32  default_reminder_minutes = 2; // absent = inherit org
+  optional string timezone                 = 3; // absent = inherit org; IANA name
+  string          default_event_color      = 4; // '#RRGGBB'
+  string          default_view             = 5; // WEEK | DAY | MONTH | AGENDA
+  optional int32  week_start_day           = 6; // 1-7, ISO-8601 Monday=1; absent = inherit org
+}
+
+message UpdateOrgSettingsRequest {
+  string org_id = 1;
+  int32  default_reminder_minutes = 2;
+  string default_timezone         = 3; // IANA name
+  int32  week_start_day           = 4; // 1-7
+}
+
+message SettingsView {
+  int32  effective_reminder_minutes = 1; // resolved: user -> org -> 10
+  string effective_timezone         = 2; // resolved: user -> org
+  string default_event_color        = 3;
+  string default_view               = 4;
+  int32  effective_week_start_day   = 5;
+  // Org-level values as configured (for the org-admin settings screen); unset fields for a plain user.
+  optional int32  org_default_reminder_minutes = 6;
+  optional string org_default_timezone         = 7;
+  optional int32  org_week_start_day            = 8;
+}
+
+// ===================== Read paths =====================
+
+message GetEventsRequest {
+  string org_id        = 1;
+  string range_start    = 2; // RFC3339 instant
+  string range_end      = 3; // RFC3339 instant
+  string view_timezone  = 4; // REQUIRED IANA name — resolves all-day date boundaries for this read
+}
+
+message GetEventsResponse {
+  repeated EventView events = 1;
+}
+
+message EventView {
+  string occurrence_id          = 1;
+  string event_id               = 2;
+  string occurrence_start_local = 3; // 'YYYY-MM-DDTHH:mm:ss' — series-instance IDENTITY, not for display math
+  string timezone                = 4; // IANA name
+  string title                   = 5;
+  google.protobuf.Timestamp start_at = 6;
+  google.protobuf.Timestamp end_at   = 7;
+  string start_local             = 8; // 'YYYY-MM-DDTHH:mm:ss'
+  string end_local                = 9;
+  bool   is_all_day              = 10;
+  string start_date              = 11; // 'YYYY-MM-DD', set only when is_all_day
+  string end_date                 = 12; // 'YYYY-MM-DD', EXCLUSIVE, set only when is_all_day
+  bool   is_recurring             = 13;
+  bool   is_override              = 14;
+  string location                 = 15;
+  string color                    = 16;
+  string show_as                  = 17; // BUSY | FREE | TENTATIVE | OUT_OF_OFFICE
+  string organizer_user_id        = 18;
+  string my_response              = 19; // NEEDS_ACTION | ACCEPTED | DECLINED | TENTATIVE
+  int32  attendee_count           = 20;
+}
+
+message GetEventDetailRequest {
+  string event_id               = 1;
+  optional string occurrence_start_local = 2; // absent = the master/series definition
+}
+
+message EventDetailView {
+  string event_id       = 1;
+  string title           = 2;
+  bytes  description     = 3; // rich-text JSON
+  string location         = 4;
+  bool   is_all_day       = 5;
+  string timezone          = 6; // IANA name
+  string start_local       = 7;
+  string end_local         = 8;
+  string start_date        = 9;
+  string end_date           = 10; // exclusive
+  google.protobuf.Timestamp start_at = 11;
+  google.protobuf.Timestamp end_at   = 12;
+  optional Recurrence recurrence = 13; // absent = single event
+  optional int32 occurrence_count = 14; // total materialized occurrences; set only when recurring
+  string show_as           = 15;
+  string color              = 16;
+  string organizer_user_id  = 17;
+  repeated AttendeeView attendees = 18;
+  repeated ReminderView reminders = 19;
+  optional string occurrence_start_local = 20; // echoes the request when a single occurrence was targeted
+  bool   is_cancelled_occurrence = 21;
+  bool   is_override_occurrence  = 22;
+}
+
+message AttendeeView {
+  string subject_type    = 1; // USER | RESOURCE | EXTERNAL_EMAIL (RESOURCE/EXTERNAL_EMAIL reserved, rejected on write in v1)
+  string subject_id       = 2;
+  string display_name     = 3; // resolved via OrgAccessClient batch lookup
+  bool   is_organizer      = 4;
+  bool   is_optional       = 5;
+  string response_status   = 6;
+  string response_note     = 7;
+}
+
+message ReminderView {
+  optional string user_id = 1; // absent = event default for all attendees
+  int32  minutes_before    = 2;
+  string channel            = 3; // IN_APP | EMAIL | PUSH
+}
+
+// Always bounded. The UI collects a start and an end date and produces this; the server never
+// synthesizes an unbounded rule.
+message Recurrence {
+  string rrule             = 1; // must carry UNTIL or COUNT, never both
+  string series_start_date = 2; // 'YYYY-MM-DD'
+  string series_end_date   = 3; // 'YYYY-MM-DD', inclusive as the user typed it
+}
+
+// ===================== Free/busy =====================
+
+message GetFreeBusyRequest {
+  string org_id            = 1;
+  repeated string user_ids = 2;
+  string range_start        = 3; // RFC3339
+  string range_end           = 4; // RFC3339
+}
+
+message GetFreeBusyResponse {
+  repeated FreeBusyEntry entries = 1;
+}
+
+message FreeBusyEntry {
+  string user_id = 1;
+  repeated BusyInterval intervals = 2; // merged, no titles
+}
+
+message BusyInterval {
+  google.protobuf.Timestamp start_at = 1;
+  google.protobuf.Timestamp end_at   = 2;
+  string show_as = 3; // BUSY | TENTATIVE | OUT_OF_OFFICE (FREE intervals are never returned)
+}
+
+message SuggestTimesRequest {
+  string org_id                     = 1;
+  repeated string required_user_ids = 2;
+  string range_start                 = 3; // RFC3339 — caller-supplied window, no working-hours policy
+  string range_end                    = 4;
+  int32  duration_minutes             = 5;
+  repeated string optional_user_ids   = 6; // rank slots, never exclude one
+}
+
+message SuggestTimesResponse {
+  repeated SuggestedSlot slots = 1; // up to 5, earliest first
+}
+
+message SuggestedSlot {
+  google.protobuf.Timestamp start_at = 1;
+  google.protobuf.Timestamp end_at   = 2;
+  int32 optional_busy_count           = 3; // how many optional_user_ids are busy in this slot — for ranking, never exclusion
+}
+
+// ===================== Writes =====================
+
+message CreateEventRequest {
+  string org_id       = 1;
+  string title         = 2;
+  bytes  description   = 3; // rich-text JSON
+  string location       = 4;
+  bool   is_all_day     = 5;
+  string timezone        = 6; // IANA
+  string start_local      = 7; // 'YYYY-MM-DDTHH:mm:ss', no offset
+  string end_local         = 8;
+  string start_date         = 9; // 'YYYY-MM-DD', set only when is_all_day
+  string end_date            = 10; // exclusive
+  optional Recurrence recurrence = 11; // absent = single event
+  string show_as              = 12;
+  string color                 = 13;
+  repeated AttendeeInput attendees = 14;
+  repeated ReminderInput reminders = 15; // empty = resolve default (org -> user -> 10)
+}
+
+message AttendeeInput {
+  string subject_type  = 1; // USER only accepted in v1 — RESOURCE/EXTERNAL_EMAIL rejected
+  string subject_id     = 2; // must resolve to a user in the caller's org
+  bool   is_optional     = 3;
+}
+
+message ReminderInput {
+  optional string user_id = 1; // absent = event default for all attendees
+  int32  minutes_before    = 2;
+  string channel            = 3;
+}
+
+// UNSPECIFIED MUST be the zero value. proto3 cannot distinguish an unset enum from its default, and
+// defaulting a series edit to THIS_EVENT would silently rename one instance out of hundreds with no
+// error — so UNSPECIFIED is rejected outright on a recurring event rather than treated as a default.
+enum EditScope {
+  EDIT_SCOPE_UNSPECIFIED = 0;
+  THIS_EVENT             = 1;
+  THIS_AND_FOLLOWING     = 2;
+  ALL_EVENTS             = 3;
+}
+
+message UpdateEventRequest {
+  string    event_id               = 1;
+  optional string occurrence_start_local = 2; // required when scope is THIS_EVENT or THIS_AND_FOLLOWING
+  EditScope scope                   = 3;
+  string title                       = 4;
+  bytes  description                  = 5;
+  string location                      = 6;
+  bool   is_all_day                    = 7;
+  string timezone                       = 8;
+  string start_local                    = 9;
+  string end_local                       = 10;
+  string start_date                      = 11;
+  string end_date                         = 12;
+  optional Recurrence recurrence          = 13; // only meaningful for ALL_EVENTS / THIS_AND_FOLLOWING
+  string show_as                           = 14;
+  string color                              = 15;
+  repeated AttendeeInput attendees          = 16;
+  repeated ReminderInput reminders          = 17;
+}
+
+message DeleteEventRequest {
+  string    event_id               = 1;
+  optional string occurrence_start_local = 2; // required when scope is THIS_EVENT or THIS_AND_FOLLOWING
+  EditScope scope                   = 3;
+}
+
+message ExtendSeriesRequest {
+  string event_id            = 1;
+  string new_series_end_date = 2; // 'YYYY-MM-DD'
+}
+
+message RespondToInviteRequest {
+  string event_id                        = 1;
+  optional string occurrence_start_local = 2; // absent = respond for the whole series
+  string response_status                  = 3; // ACCEPTED | DECLINED | TENTATIVE
+  string response_note                    = 4;
+}
+
+message SetRemindersRequest {
+  string event_id                 = 1;
+  repeated ReminderInput reminders = 2; // replaces the caller's reminders wholesale for this event
+}
