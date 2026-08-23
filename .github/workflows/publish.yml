@@ -21,8 +21,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Shared JDK + Gradle setup (pinned to a tag, never @main).
-      - uses: Sophie-KC/sophie-ci/.github/actions/setup-java-gradle@v1
+      # Inlined rather than the shared Sophie-KC/sophie-ci/.github/actions/setup-java-gradle composite
+      # action: that cross-repo action reference fails to resolve ("Unable to resolve action ... not
+      # found") even though sophie-ci's Access setting is org-wide and every permission/content check
+      # comes back clean — a standing bug in this one workflow specific to composite-ACTION references
+      # (the *reusable-workflow* form every other service's build.yml uses, `.../workflows/X.yml@v1`, is
+      # unaffected and works fine). These three steps are exactly what that action runs.
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       # Tag → version guard (tag pushes only). The published version comes from the tag; fail loudly if
       # build.gradle's DECLARED_VERSION disagrees, rather than silently shipping the wrong number.
