@@ -23,6 +23,14 @@ service OrgService {
   // Org-scoped autocomplete search over active members by name/email (chat @mentions, new DM).
   // requested_by must be ANY member of org_id — more permissive than ListOrgMembers, not admin-only.
   rpc SearchOrgMembers(SearchOrgMembersRequest) returns (SearchOrgMembersResponse);
+  // Removes a member from the org: revokes every role assignment they hold within this org (ORG
+  // scope and any PROJECT/SPACE/CHANNEL scope) and deletes the membership row. requested_by must be
+  // org_id's Org Admin. FAILED_PRECONDITION if the target is the org's last Org Admin.
+  rpc RemoveOrgMember(RemoveOrgMemberRequest) returns (google.protobuf.Empty);
+  // Changes a member's ORG-scope role: atomically revokes their current ORG-scope assignment(s) in
+  // this org and assigns the new role. requested_by must be org_id's Org Admin. FAILED_PRECONDITION
+  // if this would leave the org without an Org Admin.
+  rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (OrgMember);
   // Internal service-to-service membership check (e.g. Chat Service, before any org-scoped
   // conversation/membership operation). No requested_by / authorization gate of its own — this IS
   // the check other services gate on.
@@ -43,6 +51,11 @@ service OrgService {
   // HasScopeAccess (any assignment). Trusted-internal; for gating scope-management actions such as Doc
   // Service's add/remove page restriction.
   rpc IsScopeAdmin(IsScopeAdminRequest) returns (IsScopeAdminResponse);
+  // "Does this user hold this specific permission key at this scope?" — the fine-grained sibling of
+  // HasScopeAccess/IsScopeAdmin. A scope admin (or Org Admin for ORG scope) always holds every
+  // permission implicitly, matching how admin-gated actions already work; for anyone else, true only
+  // if one of their role assignments at this scope carries the key. Trusted-internal.
+  rpc HasPermission(HasPermissionRequest) returns (HasPermissionResponse);
   // Trusted-internal grant used at resource-creation time: assign the creator a system role at a
   // non-ORG scope (find-or-creating that org's system role for the scope type), mirroring how org
   // creation auto-assigns Org Admin. NOT the admin-gated public AssignRole — that can't grant a
@@ -181,6 +194,17 @@ message SearchOrgMembersResponse {
   repeated OrgMember members = 1; // reuses OrgMember; capped, active-only
 }
 
+message RemoveOrgMemberRequest {
+  string org_id = 1;
+  string user_id = 2; // target member being removed
+}
+
+message UpdateMemberRoleRequest {
+  string org_id = 1;
+  string user_id = 2; // target member
+  string role_id = 3; // new ORG-scope role, must belong to org_id
+}
+
 message IsOrgMemberRequest {
   string org_id = 1;
   string user_id = 2;
@@ -226,6 +250,17 @@ message IsScopeAdminRequest {
 
 message IsScopeAdminResponse {
   bool is_admin = 1;
+}
+
+message HasPermissionRequest {
+  string user_id = 1;
+  string scope_type = 2;    // ORG/PROJECT/SPACE/CHANNEL
+  string scope_id = 3;      // empty for ORG scope
+  string permission_key = 4;
+}
+
+message HasPermissionResponse {
+  bool has_permission = 1;
 }
 
 message AssignScopeRoleRequest {
@@ -278,6 +313,10 @@ message ListMyOrganizationsResponse {
 message OrganizationMembership {
   Organization organization = 1;
   string role_name = 2; // the user's ORG-scope role name in this org (e.g. "Org Admin", "Member")
+  // Server-derived, never inferred from role_name client-side (a custom role literally named "Admin"
+  // isn't one — this is the same check IsOrgAdmin uses). Replaces the frontend's old name-substring
+  // heuristic (resolveCapabilities) for gating org-management UI.
+  bool is_org_admin = 3;
 }
 
 message UpdateOrganizationRequest {

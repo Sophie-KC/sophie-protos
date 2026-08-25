@@ -32,6 +32,12 @@ service ChatService {
   rpc ListMyConversations(ListMyConversationsRequest) returns (ListMyConversationsResponse);
   // Caller must be a member. Returns the conversation plus its member list with roles.
   rpc GetConversation(GetConversationRequest) returns (Conversation);
+  // Admin-facing: every live CHANNEL (group_conversations only — DMs aren't "access" in the
+  // org-service sense) that target user_id belongs to in this org, each with its real member list
+  // (so the caller can read off that user's actual local role). Caller must be org_id's Org Admin —
+  // this is the one RPC in this service that looks at someone OTHER than the caller's own
+  // membership, for the "what does this person actually have access to" admin view.
+  rpc ListConversationsForUser(ListConversationsForUserRequest) returns (ListConversationsForUserResponse);
 
   // ===================== Messages, threads, reactions, mentions, read state =====================
 
@@ -168,6 +174,15 @@ message ListMyConversationsRequest {
 message ListMyConversationsResponse {
   repeated Conversation direct_conversations = 1;
   repeated Conversation group_conversations = 2;
+}
+
+message ListConversationsForUserRequest {
+  string org_id = 1;
+  string user_id = 2; // target member, not the caller
+}
+
+message ListConversationsForUserResponse {
+  repeated Conversation group_conversations = 1;
 }
 
 message GetConversationRequest {

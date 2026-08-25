@@ -105,6 +105,9 @@ message Project {
   string description = 5;
   string created_by = 6;
   google.protobuf.Timestamp created_at = 7;
+  // Server-derived: creator, project admin, or a "project.manage" permission holder. Lets the
+  // frontend show/hide management controls without guessing — see ProjectGuard.canManage.
+  bool can_manage = 8;
 }
 
 message TaskType {
