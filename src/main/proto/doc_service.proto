@@ -48,6 +48,14 @@ service DocService {
   // though the caller has space access). Keyset-paginated on (uploaded_at, id) via the shared
   // common/pagination.proto contract — doc-service's first user of it.
   rpc ListSpaceAttachments(ListSpaceAttachmentsRequest) returns (ListSpaceAttachmentsResponse);
+  // Paste-driven internal re-reference (clipboard copy of a fileCard/docImage node): links a file the
+  // caller already has read access to — via source_page_id, verified with the exact same two-part
+  // check GetAttachmentDownloadUrl uses — onto target_page_id's shelf, WITHOUT re-uploading. A bare
+  // file_id proves nothing on its own; source_page_id is required so the server has a specific,
+  // affordable context to run the access check against, not an unbounded "search every page" scan.
+  // Also requires WRITE access to target_page_id and same-org, mirroring AttachFileToPage. One File
+  // Service object ends up with two page_attachment owners; GC keeps it alive while either lives.
+  rpc ReferenceExistingFile(ReferenceExistingFileRequest) returns (PageAttachment);
 
   // ── Content + version history (requires space access) ──
   // Current published content (empty when the page has no version yet) + whether the caller has a
@@ -101,6 +109,10 @@ service DocService {
   rpc FilterAccessiblePages(FilterAccessiblePagesRequest) returns (FilterAccessiblePagesResponse);
   // Reciprocal (task-centric) direction: pages linked to a task, filtered to those requested_by can access.
   rpc ListDocsLinkedToTask(ListDocsLinkedToTaskRequest) returns (ListDocsLinkedToTaskResponse);
+
+  // Requires space.manage. Caller identity comes from the gRPC principal, never the body.
+  rpc SetSpaceAvatar(SetSpaceAvatarRequest) returns (Space);
+  rpc RemoveSpaceAvatar(RemoveSpaceAvatarRequest) returns (Space);
 }
 
 message Space {
@@ -115,6 +127,7 @@ message Space {
   optional string homepage_page_id = 9;  // a page in this space; absent = no homepage set
   google.protobuf.Timestamp deleted_at = 10; // absent = active; present = archived
   bool can_manage = 11;                  // may the requesting user manage this space (creator or space admin)
+  string avatar_version = 12;            // empty = no image avatar; frontend falls back to icon, then monogram
 }
 
 message Page {
@@ -278,6 +291,16 @@ message AttachFileToPageRequest {
 message RemovePageAttachmentRequest {
   string page_id = 1;
   string attachment_id = 2;
+}
+
+message ReferenceExistingFileRequest {
+  string target_page_id = 1;
+  string file_id = 2;
+  // The page the caller copied FROM — required, see the ReferenceExistingFile rpc comment above.
+  string source_page_id = 3;
+  // Client-supplied display metadata for error messages only — canonical filename/content-type/size
+  // are always re-resolved from File Service's own GetFile, never trusted from the request.
+  string file_name = 4;
 }
 
 message MovePageRequest {
@@ -593,4 +616,13 @@ message LinkedPageSummary {
 
 message ListDocsLinkedToTaskResponse {
   repeated LinkedPageSummary pages = 1; // only pages requested_by can access
+}
+
+message SetSpaceAvatarRequest {
+  string space_id = 1;
+  string source_file_id = 2;   // an ACTIVE file the caller uploaded, in this space's org
+}
+
+message RemoveSpaceAvatarRequest {
+  string space_id = 1;
 }

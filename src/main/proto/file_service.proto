@@ -40,6 +40,15 @@ service FileService {
   // Debug/admin: how many owners currently reference a file. Not used by the GC sweeper itself (which
   // re-checks inside its own delete transaction).
   rpc GetReferenceCount(GetReferenceCountRequest) returns (GetReferenceCountResponse);
+
+  // Avatars have a separate lifecycle from attachments: no dedup, no reference counting, no orphan
+  // sweeper. Bytes are decoded and re-encoded here, then served through the Gateway proxy — never
+  // presigned, because an avatar is rendered hundreds of times per screen and an expiring URL cannot
+  // be cached.
+  rpc SetAvatar(SetAvatarRequest) returns (Avatar);
+  rpc GetAvatar(GetAvatarRequest) returns (Avatar);
+  rpc DeleteAvatar(DeleteAvatarRequest) returns (google.protobuf.Empty);
+  rpc StreamAvatar(StreamAvatarRequest) returns (stream AvatarChunk);
 }
 
 message File {
@@ -88,7 +97,7 @@ message GetFileRequest {
 
 message AttachFileReferenceRequest {
   string file_id = 1;
-  string entity_type = 2;   // MESSAGE | PAGE | APP_ICON
+  string entity_type = 2;   // MESSAGE | PAGE | APP_ICON | AVATAR_SOURCE
   string entity_id = 3;
 }
 
@@ -108,7 +117,8 @@ message GetDownloadUrlResponse {
 
 message ReplaceReferencesRequest {
   string org_id = 1;
-  string owner_type = 2;   // DOC_PAGE_VERSION | DOC_PAGE_DRAFT | DOC_PAGE_SHELF | MESSAGE | APP_ICON
+  // DOC_PAGE_VERSION | DOC_PAGE_DRAFT | DOC_PAGE_SHELF | MESSAGE | APP_ICON | AVATAR_SOURCE
+  string owner_type = 2;
   string owner_id = 3;
   repeated string file_ids = 4;
 }
@@ -124,4 +134,43 @@ message GetReferenceCountRequest {
 
 message GetReferenceCountResponse {
   int32 count = 1;
+}
+
+message SetAvatarRequest {
+  string owner_type     = 1;   // USER | ORG | SPACE | CONVERSATION | PROJECT
+  string owner_id       = 2;
+  string org_id         = 3;   // empty for USER
+  string source_file_id = 4;   // an ACTIVE file uploaded through the normal flow
+  // NOT phase-2-spoofable: see File.uploaded_by above — File Service does no authz with it. Audit only.
+  string updated_by     = 5;
+}
+
+message Avatar {
+  string owner_type = 1;
+  string owner_id = 2;
+  string version = 3;
+  string content_type = 4;
+  repeated int32 sizes = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message GetAvatarRequest {
+  string owner_type = 1;
+  string owner_id = 2;
+}
+
+message DeleteAvatarRequest {
+  string owner_type = 1;
+  string owner_id = 2;
+}
+
+message StreamAvatarRequest {
+  string owner_type = 1;
+  string owner_id = 2;
+  string version = 3;
+  int32 size = 4;
+}
+
+message AvatarChunk {
+  bytes data = 1;
 }

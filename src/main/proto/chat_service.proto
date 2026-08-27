@@ -81,6 +81,24 @@ service ChatService {
   rpc PinMessage(PinMessageRequest) returns (google.protobuf.Empty);
   rpc UnpinMessage(UnpinMessageRequest) returns (google.protobuf.Empty);
   rpc ListPinnedMessages(ListPinnedMessagesRequest) returns (ListPinnedMessagesResponse); // chronological, any member
+
+  // ── Paste-driven internal re-reference (Flow B for Chat) ──
+  // Links a file the caller already has read access to (verified against source_kind/source_id —
+  // MESSAGE checked locally the same way GetAttachmentDownloadUrl does, PAGE/TASK delegated to the
+  // owning service's own equivalent check) into a not-yet-sent message draft's pending attachment
+  // set, without re-uploading. Registered against a client-generated draft_id (CHAT_MESSAGE_DRAFT
+  // owner in File Service) rather than the message directly, since the message doesn't exist until
+  // Send — mirrors doc-service's DOC_PAGE_DRAFT pattern.
+  rpc ReferenceExistingFileForDraft(ReferenceExistingFileForDraftRequest) returns (ReferenceExistingFileForDraftResponse);
+  // Wholesale-revokes every reference the given draft holds — called on composer cancel/unmount-
+  // without-send so abandoned pasted-in files become GC-eligible. A no-op (not an error) if the draft
+  // never referenced anything.
+  rpc RevokeDraftReferences(RevokeDraftReferencesRequest) returns (google.protobuf.Empty);
+
+  // Group channels only — rejected server-side on a DIRECT conversation. Requires channel
+  // OWNER/ADMIN or channel.manage. Caller identity comes from the gRPC principal, never the body.
+  rpc SetConversationAvatar(SetConversationAvatarRequest) returns (Conversation);
+  rpc RemoveConversationAvatar(RemoveConversationAvatarRequest) returns (Conversation);
 }
 
 message UpdateChannelDescriptionRequest {
@@ -144,6 +162,7 @@ message Conversation {
   // (CreateGroupChannel, GetConversation) send 0, which happens to be correct for a brand-new
   // channel but is a stub elsewhere — not part of this feature's scope.
   int64 unread_count = 8;
+  string avatar_version = 10; // CHANNEL only; empty for DIRECT (resolved client-side to the other member's user avatar)
 }
 
 message CreateGroupChannelRequest {
@@ -251,12 +270,18 @@ message SendMessageRequest {
   optional string reply_to_message_id = 4;
   optional string thread_root_message_id = 5;
   repeated string mentioned_user_ids = 6;
-  // Attachment plumbing only (no File Service yet): parallel arrays, same length, ids trusted as-is.
+  // Parallel arrays, same length. Each file_id is validated against File Service before anything is
+  // written (must exist, belong to this conversation's org, be ACTIVE) — Chat Service is the trust
+  // boundary, not a passthrough.
   repeated string attachment_file_ids = 7;
   repeated string attachment_file_names = 8;
   // When true, server resolves every current conversation member and mentions each of them (union'd
   // with mentioned_user_ids, deduplicated) rather than the caller enumerating the member list.
   bool mention_everyone = 9;
+  // The composer's client-generated draft id, if any ReferenceExistingFileForDraft calls happened
+  // during composition — lets the server revoke the now-superseded CHAT_MESSAGE_DRAFT reference once
+  // the permanent MESSAGE reference is registered below. Absent when nothing was ever pasted in.
+  optional string draft_id = 10;
 }
 
 message EditMessageRequest {
@@ -314,6 +339,33 @@ message GetAttachmentDownloadUrlResponse {
   int32 expires_in_seconds = 2;
 }
 
+message ReferenceExistingFileForDraftRequest {
+  string draft_id = 1;
+  string file_id = 2;
+  // "PAGE" | "MESSAGE" | "TASK" — which service's access model source_id must be verified against.
+  string source_kind = 3;
+  string source_id = 4;
+  // Display-only — used only in an error toast if the request is rejected; canonical name/mime/size
+  // are always re-resolved from File Service's own GetFile, never trusted from the request.
+  string file_name = 5;
+  // The org this draft's eventual message belongs to — the client already has this (same prop the
+  // composer's own upload flow uses); required because a not-yet-sent draft may have no conversation
+  // yet (a fresh DM compose), so there's no conversation row to derive it from server-side. Checked
+  // against the file's own canonical org (from File Service's GetFile), never trusted on its own.
+  string org_id = 6;
+}
+
+message ReferenceExistingFileForDraftResponse {
+  string file_id = 1;
+  string file_name = 2;
+  string mime_type = 3;
+  int64 size_bytes = 4;
+}
+
+message RevokeDraftReferencesRequest {
+  string draft_id = 1;
+}
+
 message MarkAsReadRequest {
   string conversation_id = 1;
   optional string last_read_message_id = 2;
@@ -369,4 +421,13 @@ message ChatNotificationPayload {
                                // document (mentions rendered as "@label", blocks newline-joined) and
                                // truncates AFTER flattening, so this never contains partial JSON.
                                // See MessageService.contentPreview()/plainText()/walkForText().
+}
+
+message SetConversationAvatarRequest {
+  string conversation_id = 1;
+  string source_file_id = 2;   // an ACTIVE file the caller uploaded, in this conversation's org
+}
+
+message RemoveConversationAvatarRequest {
+  string conversation_id = 1;
 }

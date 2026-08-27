@@ -112,6 +112,16 @@ service OrgService {
   // rather than a direct File Service passthrough — org-service is the access gate (the caller must
   // be able to see the app), mirroring Doc/Chat Service's equivalent attachment-download-url pattern.
   rpc GetAppIconDownloadUrl(GetAppIconDownloadUrlRequest) returns (GetAppIconDownloadUrlResponse);
+
+  // Avatars. Caller identity comes from the gRPC principal (SophieSecurityContext), never the body.
+  // A user may only set/remove their OWN avatar — identity is global across orgs, so even an Org
+  // Admin may not change another member's avatar. Returns the updated UserSummary so the caller gets
+  // the new avatar_version in one round trip.
+  rpc SetUserAvatar(SetUserAvatarRequest) returns (UserSummary);
+  rpc RemoveUserAvatar(RemoveUserAvatarRequest) returns (UserSummary);
+  // Requires org.manage_settings or the Org Admin bypass.
+  rpc SetOrgAvatar(SetOrgAvatarRequest) returns (Organization);
+  rpc RemoveOrgAvatar(RemoveOrgAvatarRequest) returns (Organization);
 }
 
 message ValidateSessionRequest {
@@ -150,6 +160,7 @@ message Organization {
   string subdomain = 3;
   string status = 4;
   google.protobuf.Timestamp created_at = 5;
+  string avatar_version = 6;   // empty = no avatar set; frontend renders the monogram
 }
 
 message CreateOrgMemberRequest {
@@ -177,6 +188,7 @@ message OrgMember {
   string status = 6;         // PENDING_ACTIVATION / ACTIVE
   string provisioned_at = 7;
   string activated_at = 8;   // empty/omitted if still pending
+  string avatar_version = 9; // empty = no avatar set; frontend renders the monogram
 }
 
 message ListOrgMembersResponse {
@@ -296,6 +308,7 @@ message UserSummary {
   string email = 2;
   string first_name = 3;
   string last_name = 4;
+  string avatar_version = 5; // empty = no avatar set; frontend renders the monogram
 }
 
 message BatchGetUsersResponse {
@@ -629,4 +642,21 @@ message GetAppIconDownloadUrlRequest {
 message GetAppIconDownloadUrlResponse {
   string download_url = 1;
   int32 expires_in_seconds = 2;
+}
+
+message SetUserAvatarRequest {
+  // Caller (SophieSecurityContext) is always the target — a user may only set their own avatar.
+  string source_file_id = 1;   // an ACTIVE file the caller uploaded
+}
+
+message RemoveUserAvatarRequest {
+}
+
+message SetOrgAvatarRequest {
+  string org_id = 1;
+  string source_file_id = 2;   // an ACTIVE file the caller uploaded, in this org
+}
+
+message RemoveOrgAvatarRequest {
+  string org_id = 1;
 }

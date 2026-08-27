@@ -93,6 +93,28 @@ service TaskService {
   rpc LinkDoc(LinkDocRequest) returns (google.protobuf.Empty);
   rpc UnlinkDoc(UnlinkDocRequest) returns (google.protobuf.Empty);
   rpc ListLinkedDocs(ListLinkedDocsRequest) returns (ListLinkedDocsResponse);
+
+  // ── Task-level attachment shelf (mirrors Doc Service's page_attachment shelf) — files uploaded to
+  // a task, whether or not embedded inline in the description's rich-text body. Description-embedded
+  // files are tracked separately via a TASK_DESCRIPTION file-reference owner, reconciled on save the
+  // same way Doc Service's ContentDocumentProcessor walk works (no version/draft split — a task
+  // description is a live column, not a published-version model). ──
+  rpc AttachFileToTask(AttachFileToTaskRequest) returns (TaskAttachment);
+  rpc ListTaskAttachments(ListTaskAttachmentsRequest) returns (ListTaskAttachmentsResponse);
+  rpc RemoveTaskAttachment(RemoveTaskAttachmentRequest) returns (google.protobuf.Empty);
+  // Task-scoped download URL for a description-embedded file — mirrors Doc Service's
+  // GetAttachmentDownloadUrl: verifies project access, then requires file_id resolve via either the
+  // shelf or the description's own materialized references, before minting a presigned GET.
+  rpc GetTaskAttachmentDownloadUrl(GetTaskAttachmentDownloadUrlRequest) returns (GetTaskAttachmentDownloadUrlResponse);
+  // Paste-driven internal re-reference (Flow B): links a file the caller already has read access to —
+  // via source_kind/source_id, verified against that source's own service (PAGE → Doc Service,
+  // MESSAGE → Chat Service, TASK → this same check against a different task) — onto target_task_id's
+  // shelf, without re-uploading. A bare file_id proves nothing on its own.
+  rpc ReferenceExistingFileForTask(ReferenceExistingFileForTaskRequest) returns (TaskAttachment);
+
+  // Requires project.manage. Caller identity comes from the gRPC principal, never the body.
+  rpc SetProjectAvatar(SetProjectAvatarRequest) returns (Project);
+  rpc RemoveProjectAvatar(RemoveProjectAvatarRequest) returns (Project);
 }
 
 // ===================== Messages =====================
@@ -108,6 +130,7 @@ message Project {
   // Server-derived: creator, project admin, or a "project.manage" permission holder. Lets the
   // frontend show/hide management controls without guessing — see ProjectGuard.canManage.
   bool can_manage = 8;
+  string avatar_version = 9; // empty = no avatar set; frontend renders the monogram
 }
 
 message TaskType {
@@ -718,4 +741,65 @@ message LinkedDoc {
 
 message ListLinkedDocsResponse {
   repeated LinkedDoc docs = 1; // only pages the caller can access (Doc Service filters)
+}
+
+// ===================== Task attachment shelf =====================
+
+message TaskAttachment {
+  string id = 1;
+  string task_id = 2;
+  string file_id = 3;
+  string filename = 4;
+  string content_type = 5;
+  int64 size_bytes = 6;
+  string uploaded_by = 7;
+  google.protobuf.Timestamp uploaded_at = 8;
+}
+
+message AttachFileToTaskRequest {
+  string task_id = 1;
+  string file_id = 2;
+}
+
+message ListTaskAttachmentsRequest {
+  string task_id = 1;
+}
+
+message ListTaskAttachmentsResponse {
+  repeated TaskAttachment attachments = 1;
+}
+
+message RemoveTaskAttachmentRequest {
+  string task_id = 1;
+  string attachment_id = 2;
+}
+
+message GetTaskAttachmentDownloadUrlRequest {
+  string task_id = 1;
+  string file_id = 2;
+}
+
+message GetTaskAttachmentDownloadUrlResponse {
+  string download_url = 1;
+  int32 expires_in_seconds = 2;
+}
+
+message ReferenceExistingFileForTaskRequest {
+  string target_task_id = 1;
+  string file_id = 2;
+  // "PAGE" | "MESSAGE" | "TASK" — which service's access model source_id must be verified against.
+  string source_kind = 3;
+  string source_id = 4;
+  // Display-only — used only in an error toast if the request is rejected; canonical name/mime/size
+  // are always re-resolved from File Service's own GetFile, never trusted from the request.
+  string file_name = 5;
+}
+
+message SetProjectAvatarRequest {
+  string project_id = 1;
+  string source_file_id = 2;   // an ACTIVE file the caller uploaded, in this project's org
+}
+
+message RemoveProjectAvatarRequest {
+  string project_id = 1;
 }
