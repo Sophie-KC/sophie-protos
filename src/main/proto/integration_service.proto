@@ -36,6 +36,14 @@ service IntegrationService {
   // lists the group's projects, and registers a webhook on each one. Org admin only.
   rpc ConfirmGitLabGroupSelection(ConfirmGitLabGroupSelectionRequest) returns (Connection);
 
+  // Org admin only. Returns Google's OAuth authorize URL, reusing the same signed single-use
+  // state-token mechanism as InitiateInstallation/InitiateGitLabOAuth (state.provider = "GOOGLE").
+  // Unlike GitLab, a Google account needs no group/project selection at connect time — which calendars
+  // to sync is decided later, in calendar-service's sync-setup UI — so Google's callback
+  // (/integrations/google/callback, HTTP, not gRPC) finishes the connection in one step and there is no
+  // confirm-selection follow-up RPC.
+  rpc InitiateGoogleOAuth(InitiateGoogleOAuthRequest) returns (InitiateGoogleOAuthResponse);
+
   // NOTE: no GetAccessToken/RegisterWebhook RPCs yet — nothing in the current split needs them
   // (GitLab webhook registration stays entirely inside ConfirmGitLabGroupSelection's own flow, same
   // as before). Add them when calendar-service's Google/Outlook sync actually needs to call a
@@ -46,7 +54,7 @@ service IntegrationService {
 message Connection {
   string id = 1;
   string org_id = 2;
-  string provider = 3;                // GITHUB, GITLAB
+  string provider = 3;                // GITHUB, GITLAB, GOOGLE
   string external_account_id = 4;
   string external_account_name = 5;
   string connected_by = 6;
@@ -90,4 +98,12 @@ message InitiateGitLabOAuthResponse {
 message ConfirmGitLabGroupSelectionRequest {
   string selection_token = 1;
   string group_id = 2; // one of the ids returned in the callback's group list
+}
+
+message InitiateGoogleOAuthRequest {
+  string org_id = 1;
+}
+
+message InitiateGoogleOAuthResponse {
+  string authorize_url = 1;
 }
