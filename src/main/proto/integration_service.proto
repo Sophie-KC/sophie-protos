@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package com.platform.integration.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.integrationservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Generic per-org connections to an external provider (GitHub, GitLab, and later Google/Microsoft
+// for calendar sync) — OAuth/install flow, encrypted token storage, and connection lifecycle only.
+// Provider-domain logic (VCS commit/PR/MR reference tracking, calendar event sync, ...) lives in
+// whichever service owns that domain and calls back here only for a token or to register a webhook
+// delivery target — this service never interprets what a provider's data means.
+service IntegrationService {
+  // Org admin only (IsOrgAdmin). Never returns the encrypted token fields — those never leave this
+  // service over the wire.
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  // Org admin only. Deletes the connection.
+  rpc DisconnectIntegration(DisconnectIntegrationRequest) returns (google.protobuf.Empty);
+
+  // Org admin only. Returns the GitHub App's installation URL for the frontend to redirect the org
+  // admin's browser to. GitHub redirects back to this service's own HTTP callback (not gRPC — see
+  // /integrations/github/callback) after the admin installs, carrying installation_id/setup_action/state.
+  rpc InitiateInstallation(InitiateInstallationRequest) returns (InitiateInstallationResponse);
+
+  // Org admin only. Returns GitLab's OAuth authorize URL, reusing the same signed single-use state-token
+  // mechanism as InitiateInstallation (state.provider = "GITLAB" instead of "GITHUB"). GitLab redirects
+  // back to /integrations/gitlab/callback (HTTP, not gRPC) carrying code + state.
+  rpc InitiateGitLabOAuth(InitiateGitLabOAuthRequest) returns (InitiateGitLabOAuthResponse);
+  // A GitLab account can belong to many groups — the callback can't pick one on its own, so it stops
+  // after token exchange + fetching the user's groups and hands back a short-lived selection_token (see
+  // vcs_gitlab_pending_selections) instead of a finished connection. This RPC is the follow-up call that
+  // finalizes it: re-checks org-admin status, creates the connections row with real encrypted tokens,
+  // lists the group's projects, and registers a webhook on each one. Org admin only.
+  rpc ConfirmGitLabGroupSelection(ConfirmGitLabGroupSelectionRequest) returns (Connection);
+
+  // NOTE: no GetAccessToken/RegisterWebhook RPCs yet — nothing in the current split needs them
+  // (GitLab webhook registration stays entirely inside ConfirmGitLabGroupSelection's own flow, same
+  // as before). Add them when calendar-service's Google/Outlook sync actually needs to call a
+  // provider API directly, per calendar-integration-design.md's build order — no speculative surface
+  // ahead of a real caller.
+}
+
+message Connection {
+  string id = 1;
+  string org_id = 2;
+  string provider = 3;                // GITHUB, GITLAB
+  string external_account_id = 4;
+  string external_account_name = 5;
+  string connected_by = 6;
+  google.protobuf.Timestamp connected_at = 7;
+  // access_token / refresh_token are intentionally NOT exposed here — encrypted at rest, never returned.
+  // True if the provider's refresh-token exchange failed (revoked/expired beyond recovery) — sync/
+  // webhooks for this connection will silently stop until the org admin reconnects. Always false for
+  // GitHub (installation tokens are minted fresh per call, nothing to "expire" at the connection level).
+  bool needs_reconnect = 8;
+}
+
+message ListConnectionsRequest {
+  string org_id = 1;
+}
+
+message ListConnectionsResponse {
+  repeated Connection connections = 1;
+}
+
+message DisconnectIntegrationRequest {
+  string connection_id = 1;
+}
+
+message InitiateInstallationRequest {
+  string org_id = 1;
+  string provider = 2; // GITHUB only for now; GITLAB reserved for Stage 3
+}
+
+message InitiateInstallationResponse {
+  string installation_url = 1;
+}
+
+message InitiateGitLabOAuthRequest {
+  string org_id = 1;
+}
+
+message InitiateGitLabOAuthResponse {
+  string authorize_url = 1;
+}
+
+message ConfirmGitLabGroupSelectionRequest {
+  string selection_token = 1;
+  string group_id = 2; // one of the ids returned in the callback's group list
+}

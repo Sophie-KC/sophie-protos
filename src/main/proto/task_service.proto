@@ -58,9 +58,23 @@ service TaskService {
   rpc BatchGetTaskSummaries(BatchGetTaskSummariesRequest) returns (BatchGetTaskSummariesResponse); // cross-link enrichment
   rpc GetTaskByReference(GetTaskByReferenceRequest) returns (TaskSummary);                          // resolve KEY-NUMBER → task
   // Trusted-internal tier, same as Org Service's IsOrgMember/BatchGetUsers: no requested_by, no access
-  // check. orgId disambiguates the key directly. Reachable only from other backend services — VCS
-  // Service's webhook processing has no user in context to check access for.
+  // check. orgId disambiguates the key directly. Reachable only from other backend services —
+  // integration-service's webhook processing has no user in context to check access for.
   rpc ResolveTaskReferenceInternal(ResolveTaskReferenceInternalRequest) returns (TaskSummary);
+
+  // ── VCS references (commits/branches/PRs/MRs linked to a task) ──
+  // Caller (the Gateway) is trusted to have already validated the user's access to the task itself —
+  // same delegation pattern GetTask's own callers use.
+  rpc ListVcsReferencesForTask(ListVcsReferencesForTaskRequest) returns (ListVcsReferencesForTaskResponse);
+  // Trusted-internal, called by integration-service after it verifies a GitHub/GitLab webhook's
+  // signature — this service does the actual event parsing (commit-message task-reference regex,
+  // PR/MR title+body) and upserts the resulting VcsReference rows. No user in context to check access
+  // for, same trust tier as ResolveTaskReferenceInternal above.
+  rpc ProcessVcsWebhookEvent(ProcessVcsWebhookEventRequest) returns (google.protobuf.Empty);
+  // Trusted-internal, called by integration-service's DisconnectIntegration flow — mirrors the
+  // app-level FK-integrity convention this platform already uses for every cross-service id (explicit
+  // cleanup call, not a real FK, since the two tables now live in different databases).
+  rpc DeleteVcsReferencesForConnection(DeleteVcsReferencesForConnectionRequest) returns (google.protobuf.Empty);
   rpc UpdateTask(UpdateTaskRequest) returns (Task);
   rpc ChangeTaskStatus(ChangeTaskStatusRequest) returns (Task);       // transition- + completion-validated
   rpc SetTaskParent(SetTaskParentRequest) returns (Task);             // one-level cap; null clears
@@ -460,6 +474,40 @@ message ResolveTaskReferenceInternalRequest {
   string org_id = 1;
   string project_key = 2;
   int32 task_number = 3;
+}
+
+message VcsReference {
+  string id = 1;
+  string vcs_connection_id = 2;
+  string task_id = 3;
+  string reference_type = 4;   // COMMIT, BRANCH, PULL_REQUEST, MERGE_REQUEST
+  string external_id = 5;      // commit SHA / PR-MR number / branch name
+  optional string title = 6;
+  string url = 7;
+  optional string state = 8;   // open/merged/closed; absent for commits
+  optional string author_external = 9;
+  google.protobuf.Timestamp occurred_at = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message ListVcsReferencesForTaskRequest {
+  string task_id = 1;
+}
+
+message ListVcsReferencesForTaskResponse {
+  repeated VcsReference references = 1;
+}
+
+message ProcessVcsWebhookEventRequest {
+  string vcs_connection_id = 1;
+  string org_id = 2;
+  string provider = 3;       // GITHUB, GITLAB
+  string event_type = 4;     // push, pull_request, etc (GitHub) / equivalent GitLab event
+  bytes raw_body = 5;
+}
+
+message DeleteVcsReferencesForConnectionRequest {
+  string vcs_connection_id = 1;
 }
 
 // Enough to render a cross-link and build its full-page URL (project_key + task_number).
