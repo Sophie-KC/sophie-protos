@@ -48,6 +48,17 @@ service CalendarService {
   // RecurrenceService.validate + expand the write path calls — not a parallel implementation. No
   // side effects; read-only.
   rpc PreviewRecurrence   (PreviewRecurrenceRequest)   returns (PreviewRecurrenceResponse);
+
+  // ===== External calendar sync (design doc calendar-integration-design.md, step 3) =====
+  // Self-service: any org member connects their OWN external calendar — see integration_service.proto's
+  // InitiateGoogleOAuth for the account-level OAuth connection this builds on. Runs the initial full
+  // sync synchronously (bounded window, see application.yaml's calendar.external-sync.* config).
+  rpc ConnectExternalCalendar (ConnectExternalCalendarRequest) returns (ExternalCalendarConnectionView);
+  rpc ListExternalCalendarConnections (ListExternalCalendarConnectionsRequest) returns (ListExternalCalendarConnectionsResponse);
+  // Internal only (SP-tier) — integration-service calls this from its own DisconnectIntegration flow
+  // to clean up calendar-service's synced data, same pattern as task-service's
+  // DeleteVcsReferencesForConnection.
+  rpc DeleteExternalCalendarDataForConnection (DeleteExternalCalendarDataForConnectionRequest) returns (google.protobuf.Empty);
 }
 
 // ===================== Settings =====================
@@ -120,6 +131,9 @@ message EventView {
   int32  attendee_count           = 20;
   // Set only when is_recurring — the expiry banner needs this without a second request per event.
   google.protobuf.Timestamp series_ends_at = 21;
+  // 'internal' | 'google' — external rows are read-only, synced copies (see ExternalCalendarConnectionView);
+  // the native model above is always source='internal'.
+  string source = 22;
 }
 
 message GetEventDetailRequest {
@@ -174,6 +188,37 @@ message Recurrence {
   string rrule             = 1; // must carry UNTIL or COUNT, never both
   string series_start_date = 2; // 'YYYY-MM-DD'
   string series_end_date   = 3; // 'YYYY-MM-DD', inclusive as the user typed it
+}
+
+// ===================== External calendar sync =====================
+
+message ConnectExternalCalendarRequest {
+  string org_id                    = 1;
+  string integration_connection_id = 2; // integration-service's Connection.id (already OAuth'd, see integration_service.proto)
+}
+
+message ListExternalCalendarConnectionsRequest {
+  string org_id = 1;
+}
+
+message ListExternalCalendarConnectionsResponse {
+  repeated ExternalCalendarConnectionView connections = 1;
+}
+
+message ExternalCalendarConnectionView {
+  string id                        = 1;
+  string integration_connection_id = 2;
+  string provider                  = 3; // GOOGLE only in v1
+  string external_calendar_id      = 4;
+  string display_name              = 5;
+  string color                     = 6;
+  string status                    = 7; // ACTIVE | SYNC_ERROR | REAUTH_REQUIRED
+  google.protobuf.Timestamp last_synced_at = 8;
+  int32  event_count               = 9;
+}
+
+message DeleteExternalCalendarDataForConnectionRequest {
+  string integration_connection_id = 1;
 }
 
 // ===================== Free/busy =====================

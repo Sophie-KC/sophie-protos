@@ -14,10 +14,13 @@ import "google/protobuf/empty.proto";
 // whichever service owns that domain and calls back here only for a token or to register a webhook
 // delivery target — this service never interprets what a provider's data means.
 service IntegrationService {
-  // Org admin only (IsOrgAdmin). Never returns the encrypted token fields — those never leave this
-  // service over the wire.
+  // Org admin: every connection in the org. Non-admin org member: only their own self-service
+  // connections (GOOGLE) — GitHub/GitLab are org-wide and admin-managed, invisible to a non-admin
+  // caller here. Never returns the encrypted token fields — those never leave this service over the
+  // wire.
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
-  // Org admin only. Deletes the connection.
+  // Org admin: deletes any connection (incl. offboarding a member's Google connection). Non-admin:
+  // may delete only a GOOGLE connection they themselves connected (connected_by == caller).
   rpc DisconnectIntegration(DisconnectIntegrationRequest) returns (google.protobuf.Empty);
 
   // Org admin only. Returns the GitHub App's installation URL for the frontend to redirect the org
@@ -36,19 +39,25 @@ service IntegrationService {
   // lists the group's projects, and registers a webhook on each one. Org admin only.
   rpc ConfirmGitLabGroupSelection(ConfirmGitLabGroupSelectionRequest) returns (Connection);
 
-  // Org admin only. Returns Google's OAuth authorize URL, reusing the same signed single-use
-  // state-token mechanism as InitiateInstallation/InitiateGitLabOAuth (state.provider = "GOOGLE").
-  // Unlike GitLab, a Google account needs no group/project selection at connect time — which calendars
-  // to sync is decided later, in calendar-service's sync-setup UI — so Google's callback
-  // (/integrations/google/callback, HTTP, not gRPC) finishes the connection in one step and there is no
-  // confirm-selection follow-up RPC.
+  // Self-service: any org MEMBER (not just admins) — Google Calendar is inherently personal, and
+  // Google's own OAuth consent requires the actual account holder to authenticate, so an admin
+  // cannot connect on someone else's behalf. Returns Google's OAuth authorize URL, reusing the same
+  // signed single-use state-token mechanism as InitiateInstallation/InitiateGitLabOAuth
+  // (state.provider = "GOOGLE"). Unlike GitLab, a Google account needs no group/project selection at
+  // connect time — which calendars to sync is decided later, in calendar-service's sync-setup UI —
+  // so Google's callback (/integrations/google/callback, HTTP, not gRPC) finishes the connection in
+  // one step and there is no confirm-selection follow-up RPC.
   rpc InitiateGoogleOAuth(InitiateGoogleOAuthRequest) returns (InitiateGoogleOAuthResponse);
 
-  // NOTE: no GetAccessToken/RegisterWebhook RPCs yet — nothing in the current split needs them
-  // (GitLab webhook registration stays entirely inside ConfirmGitLabGroupSelection's own flow, same
-  // as before). Add them when calendar-service's Google/Outlook sync actually needs to call a
-  // provider API directly, per calendar-integration-design.md's build order — no speculative surface
-  // ahead of a real caller.
+  // Internal only (SP-tier) — calendar-service calls this to get a live, refreshed Google access
+  // token for a connection it has already verified (via ListConnections) belongs to the caller. No
+  // requested_by field, no access check here by design — ownership is the caller's responsibility,
+  // same trust model as task_service.proto's ResolveTaskReferenceInternal.
+  //
+  // NOTE: no RegisterWebhook RPC yet — nothing in the current split needs it (GitLab webhook
+  // registration stays entirely inside ConfirmGitLabGroupSelection's own flow). Add it when
+  // calendar-service's webhook-driven sync (build order step 5) actually needs it.
+  rpc GetAccessToken(GetAccessTokenRequest) returns (GetAccessTokenResponse);
 }
 
 message Connection {
@@ -106,4 +115,13 @@ message InitiateGoogleOAuthRequest {
 
 message InitiateGoogleOAuthResponse {
   string authorize_url = 1;
+}
+
+message GetAccessTokenRequest {
+  string connection_id = 1;
+}
+
+message GetAccessTokenResponse {
+  string access_token = 1;
+  google.protobuf.Timestamp expires_at = 2;
 }
