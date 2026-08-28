@@ -10,9 +10,16 @@ import "google/protobuf/empty.proto";
 import "common/pagination.proto";
 
 // Generic notification service: "a thing happened that's worth notifying someone about",
-// independent of source producer (Chat Service today; Tasks/Docs are expected future producers) and
-// independent of delivery channel (in-app only today; email/SMS/push are expected future channels
-// layered on top, not a redesign of this contract).
+// independent of source producer (Chat Service and Calendar Service today; Tasks/Docs are expected
+// future producers) and independent of delivery channel (in-app + push today; email/SMS are expected
+// future channels layered on top, not a redesign of this contract).
+//
+// type/source_reference/payload are opaque here by design — Notification Service never parses them,
+// it only stores and returns them (see Notification.type below). The actual per-type contracts live
+// in each producer's own .proto file, next to the RPCs that trigger them (see chat_service.proto's
+// "Notification Service integration" section for Chat's two types, calendar_service.proto's for
+// Calendar's six) — a producer is the only party that knows its own notification shapes, so its proto
+// file is the right place to define them, not this one.
 service NotificationService {
   // Internal only — trusted the same as Org Service's IsOrgMember/BatchGetUsers: no x-user-id is
   // required, any backend service may create a notification for any recipient. Publishes a
@@ -41,7 +48,9 @@ message Notification {
   string id = 1;
   string recipient_user_id = 2;
   string org_id = 3;
-  string type = 4;             // e.g. "chat.mention", "chat.thread_reply"
+  string type = 4;             // Producer-defined, dotted-lowercase, namespaced by producer: "<producer>.<event>"
+                                // (e.g. "chat.mention", "calendar.event_invite") — see the producing service's
+                                // own .proto for what source_reference/payload actually contain for its types.
   string source_service = 5;   // e.g. "chat-service" — which service created this
   string source_reference = 6; // caller-supplied JSON, stored/returned opaquely (e.g. conversationId, messageId)
   string payload = 7;          // caller-supplied JSON, stored/returned opaquely (human-readable render data)

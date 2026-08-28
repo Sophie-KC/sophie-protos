@@ -9,7 +9,7 @@ group = 'org.sophie'
 // -PreleaseVersion=<tag without the leading v> so the PUBLISHED version comes from the git tag, and it
 // asserts the tag equals DECLARED_VERSION first (fails otherwise) — so a v0.2.0 tag can never publish
 // while build.gradle still says 0.1.0. Local publishToMavenLocal (no -P) uses DECLARED_VERSION as-is.
-ext.DECLARED_VERSION = '0.16.0'
+ext.DECLARED_VERSION = '0.17.0'
 version = project.findProperty('releaseVersion') ?: DECLARED_VERSION
 description = 'sophie-protos — single source of truth for all sophie gRPC contracts'
 

@@ -322,3 +322,58 @@ message PreviewRecurrenceResponse {
   string error_code             = 5;
   int32  limit_value            = 6; // the N in "over the 5,000 limit", for the message
 }
+
+// ===================== Notification Service integration =====================
+// JSON shapes Calendar Service builds when calling Notification Service's CreateNotification —
+// serialized via protobuf JsonFormat (same technique Chat Service uses, see ChatNotificationPayload
+// et al. in chat_service.proto) into source_reference/payload, which Notification Service stores and
+// returns opaquely. Not part of CalendarService's own RPC surface.
+//
+// Notification type strings, dotted-lowercase (matching Chat Service's "chat.mention" convention —
+// see notification_service.proto's Notification.type comment):
+//   calendar.event_invite     -> EventSourceReference / EventNotificationPayload
+//   calendar.event_updated    -> EventSourceReference / EventNotificationPayload
+//   calendar.event_cancelled  -> EventSourceReference / EventNotificationPayload
+//   calendar.rsvp_received    -> EventSourceReference / RsvpNotificationPayload
+//   calendar.reminder         -> ReminderSourceReference / ReminderNotificationPayload
+//   calendar.series_ending    -> EventSourceReference / SeriesEndingNotificationPayload
+//
+// Every payload below carries `title` as the canonical human-readable headline field — the one field
+// name every consumer (web, mobile, Notification Service's own push body) can rely on across every
+// notification type in the whole platform, not just Calendar's.
+
+message EventSourceReference {
+  string event_id = 1;
+}
+
+// invite / updated / cancelled carry nothing beyond the event's current title.
+message EventNotificationPayload {
+  string title = 1;
+}
+
+message RsvpNotificationPayload {
+  string title = 1;
+  string responder_id = 2;
+  string response_status = 3; // ACCEPTED | DECLINED | TENTATIVE
+}
+
+message ReminderSourceReference {
+  string event_id = 1;
+  string occurrence_id = 2;
+}
+
+message ReminderNotificationPayload {
+  string title = 1;
+  string starts_at = 2;      // ISO-8601 instant
+  string location = 3;       // "" when the event/occurrence has none
+  int32 minutes_before = 4;
+  string event_id = 5;       // duplicated from source_reference — reminder rendering never needs to
+                              // decode both fields to get everything it needs
+  string occurrence_id = 6;
+  string idempotency_key = 7;
+}
+
+message SeriesEndingNotificationPayload {
+  string title = 1;
+  string series_ends_at = 2; // 'YYYY-MM-DD'
+}
