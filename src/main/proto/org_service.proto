@@ -127,6 +127,13 @@ service OrgService {
   // above). Added for subscription-service's SubscriptionBackfillRunner (subscriptions Phase 2 §0.2),
   // which pages through every org to find the ones with no subscription row yet.
   rpc ListOrganizations(ListOrganizationsRequest) returns (ListOrganizationsResponse);
+
+  // Trusted-internal, no identity field — same tier as IsOrgMember. Added for subscription-service's
+  // ChangePlan (subscriptions Phase 2b §2): seats requested on a plan change must never be set below
+  // the org's actual current member count, or the invoice bills for fewer seats than are in use.
+  // members = ACTIVE + PENDING_ACTIVATION org_members rows (same definition org-service's own seat
+  // enforcement uses); guests are never counted (design doc §1 — guests don't consume a seat).
+  rpc GetOrgSeatCount(GetOrgSeatCountRequest) returns (GetOrgSeatCountResponse);
 }
 
 message ValidateSessionRequest {
@@ -337,6 +344,14 @@ message ListOrganizationsRequest {
 message ListOrganizationsResponse {
   repeated Organization organizations = 1;
   .org.sophie.common.PageResponse page = 2;
+}
+
+message GetOrgSeatCountRequest {
+  string org_id = 1;
+}
+
+message GetOrgSeatCountResponse {
+  int64 members = 1; // ACTIVE + PENDING_ACTIVATION org_members rows; guests excluded
 }
 
 message OrganizationMembership {
