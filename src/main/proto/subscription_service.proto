@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package com.platform.subscription.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.subscriptionservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Subscription Service: owns plans, prices, entitlements, and the per-org subscription lifecycle.
+// Entitlement checks are on the hot path of every module (invite a member, upload a file, create a
+// project) — EntitlementService is the surface every service should actually call; consumers are
+// expected to cache the resolved map rather than hit CheckEntitlement per key. gRPC-only, internal
+// service-to-service — no caller-identity check here, the caller is trusted to pass the right org_id
+// (same trust model as File Service).
+//
+// PlanAdminService / SubscriptionAdminService / PlatformMetricsService (staff-only surfaces) are
+// declared in this file so the wire contract is stable across phases, but are not implemented by
+// subscription-service until the platform-staff-auth phase — calling them today returns UNIMPLEMENTED.
+service EntitlementService {
+  // The call every consuming service should actually make: the whole resolved map for an org, meant
+  // to be cached (Redis + a local near-cache) rather than re-fetched per key.
+  rpc GetEntitlements (GetEntitlementsRequest) returns (EntitlementMap);
+  // Single-key convenience, mainly for callers that don't want to hold a cache themselves yet.
+  rpc CheckEntitlement (CheckEntitlementRequest) returns (EntitlementCheck);
+  // Seat-specific check used by org-service's invite path. NOTE: this is a read — the actual
+  // enforcement must still happen inside the caller's own transaction (advisory lock + count +
+  // insert atomically) to avoid a race between two concurrent invites; this RPC alone is not
+  // sufficient to prevent overselling seats.
+  rpc CheckSeatAvailable (CheckSeatAvailableRequest) returns (SeatCheck);
+}
+
+service SubscriptionService {
+  rpc GetSubscription (GetSubscriptionRequest) returns (Subscription);
+  // Called synchronously from org-service's signup saga (primary path) and, idempotently, from an
+  // org.created event consumer as a reconciliation fallback. Returns the existing subscription
+  // unchanged if the org already has one.
+  rpc CreateFreeSubscription (CreateFreeSubscriptionRequest) returns (Subscription);
+  rpc ListPlans (ListPlansRequest) returns (ListPlansResponse);
+}
+
+// ── EntitlementService messages ─────────────────────────────────────────────
+
+message GetEntitlementsRequest {
+  string org_id = 1;
+}
+
+message EntitlementMap {
+  map<string, EntitlementValue> entitlements = 1;
+  string subscription_status = 2;   // ACTIVE | PAST_DUE | GRACE | SUSPENDED | CANCELED | EXPIRED | TRIALING
+  AccessMode access_mode = 3;
+}
+
+enum AccessMode {
+  ACCESS_MODE_UNSPECIFIED = 0;
+  FULL = 1;
+  READ_ONLY = 2;
+}
+
+message EntitlementValue {
+  bool is_unlimited = 1;
+  int64 number_value = 2;
+  bool bool_value = 3;
+  EntitlementSource source = 4;
+}
+
+enum EntitlementSource {
+  ENTITLEMENT_SOURCE_UNSPECIFIED = 0;
+  PLAN = 1;
+  OVERRIDE = 2;
+  DEFAULT = 3;
+}
+
+message CheckEntitlementRequest {
+  string org_id = 1;
+  string key = 2;
+}
+
+message EntitlementCheck {
+  bool allowed = 1;
+  bool is_unlimited = 2;
+  int64 limit = 3;
+}
+
+message CheckSeatAvailableRequest {
+  string org_id = 1;
+  int32 additional = 2;
+}
+
+message SeatCheck {
+  bool allowed = 1;
+  int64 current = 2;
+  int64 max = 3;      // Long.MAX_VALUE-equivalent (int64 max) when unlimited
+}
+
+// ── SubscriptionService messages ────────────────────────────────────────────
+
+message GetSubscriptionRequest {
+  string org_id = 1;
+}
+
+message CreateFreeSubscriptionRequest {
+  string org_id = 1;
+}
+
+message ListPlansRequest {
+  bool include_private = 1;
+}
+
+message ListPlansResponse {
+  repeated Plan plans = 1;
+}
+
+message Plan {
+  string id = 1;
+  string code = 2;              // FREE | PRO | BUSINESS
+  string name = 3;
+  string description = 4;
+  int32 tier_rank = 5;
+  bool is_free = 6;
+  bool is_public = 7;
+  repeated PlanPrice prices = 8;
+}
+
+message PlanPrice {
+  string id = 1;
+  string billing_period = 2;    // MONTHLY | ANNUAL
+  string currency = 3;
+  string amount_per_seat = 4;   // decimal string — never a float/double on the wire
+  int32 min_seats = 5;
+}
+
+message Subscription {
+  string id = 1;
+  string org_id = 2;
+  string plan_id = 3;
+  string plan_code = 4;
+  optional string plan_price_id = 5;
+  string billing_period = 6;    // MONTHLY | ANNUAL | NONE
+  string status = 7;            // TRIALING | ACTIVE | PAST_DUE | GRACE | SUSPENDED | CANCELED | EXPIRED
+  int32 seats_purchased = 8;
+  int32 seats_in_use = 9;
+  google.protobuf.Timestamp current_period_start = 10;
+  google.protobuf.Timestamp current_period_end = 11;
+  bool cancel_at_period_end = 12;
+}
+
+// ── Staff-only admin surfaces (contract reserved, not yet implemented) ─────
+
+service PlanAdminService {
+  rpc ListPlans (google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+service SubscriptionAdminService {
+  rpc ListSubscriptions (google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+service PlatformMetricsService {
+  rpc GetSubscriptionMetrics (google.protobuf.Empty) returns (google.protobuf.Empty);
+}
