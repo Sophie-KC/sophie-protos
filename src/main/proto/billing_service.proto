@@ -83,18 +83,18 @@ message CreateInvoiceRequest {
   google.protobuf.Timestamp due_at = 7;
 }
 
-// Pre-priced: billing-service computes subtotal/tax/total per line (HALF_UP, 2 decimals) from these,
-// but does NOT decide what the unit_amount or tax_percentage ARE — that pricing decision already
-// happened in subscription-service.
+// Pre-priced but NOT pre-taxed: subscription-service decides line_type/description/quantity/
+// unit_amount (the pricing decision), but tax resolution is billing-service's own job (Phase 2b §5.2 —
+// it needs billing_account.is_vat_payer and the tax_rate row valid at issued_at, both owned by
+// billing-service's own DB, resolved independently per invoice rather than trusted from the caller).
 message InvoiceLineInput {
   string line_type = 1;        // SEAT, ADDON, PRORATION, DISCOUNT
   string description = 2;
   string plan_code = 3;
   string quantity = 4;         // decimal string — PRORATION lines use fractional quantities
   string unit_amount = 5;      // decimal string, may be negative (PRORATION credit)
-  string tax_percentage = 6;   // decimal string, e.g. "12.00"; "0.00" still renders a tax section
-  google.protobuf.Timestamp period_start = 7;
-  google.protobuf.Timestamp period_end = 8;
+  google.protobuf.Timestamp period_start = 6;
+  google.protobuf.Timestamp period_end = 7;
 }
 
 message ListInvoicesRequest {
