@@ -122,6 +122,11 @@ service OrgService {
   // Requires org.manage_settings or the Org Admin bypass.
   rpc SetOrgAvatar(SetOrgAvatarRequest) returns (Organization);
   rpc RemoveOrgAvatar(RemoveOrgAvatarRequest) returns (Organization);
+
+  // Staff-tier, not a member-facing RPC — every org platform-wide, not "my orgs" (ListMyOrganizations
+  // above). Added for subscription-service's SubscriptionBackfillRunner (subscriptions Phase 2 §0.2),
+  // which pages through every org to find the ones with no subscription row yet.
+  rpc ListOrganizations(ListOrganizationsRequest) returns (ListOrganizationsResponse);
 }
 
 message ValidateSessionRequest {
@@ -321,6 +326,17 @@ message ListMyOrganizationsRequest {
 
 message ListMyOrganizationsResponse {
   repeated OrganizationMembership memberships = 1;
+}
+
+message ListOrganizationsRequest {
+  // Keyset on created_at ASC then id (tiebreaker), so a backfill run started while orgs are still
+  // being created never skips or duplicates a row. Default direction FORWARD.
+  .org.sophie.common.PageRequest page = 1;
+}
+
+message ListOrganizationsResponse {
+  repeated Organization organizations = 1;
+  .org.sophie.common.PageResponse page = 2;
 }
 
 message OrganizationMembership {

@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package com.platform.billing.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.billingservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "common/pagination.proto";
+
+// Billing Service: billing accounts, invoices, payments, credit notes. Knows nothing about plans,
+// seats or entitlements — it receives pre-priced line items and does no pricing of its own. The
+// dependency arrow points one way: subscription-service depends on billing-service, never the
+// reverse (subscriptions module design doc §2 / Phase 2 prompt §4.3).
+//
+// Money on the wire is always a DECIMAL STRING (e.g. "1090000.00"), never double or an integer minor
+// unit — UZS's minor unit (tiyin) is unused in practice and a string round-trips through BigDecimal
+// without a scale decision hidden in the transport. Every amount field below is this shape.
+service BillingAccountService {
+  rpc GetBillingAccount    (GetBillingAccountRequest)    returns (BillingAccount);
+  rpc UpsertBillingAccount (UpsertBillingAccountRequest) returns (BillingAccount);
+}
+
+service InvoiceService {
+  // Internal only — called by subscription-service with pre-priced lines. See CreateInvoiceRequest.
+  rpc CreateInvoice    (CreateInvoiceRequest)    returns (Invoice);
+  rpc ListInvoices     (ListInvoicesRequest)     returns (ListInvoicesResponse);
+  rpc GetInvoice        (GetInvoiceRequest)       returns (Invoice);
+  rpc RenderInvoicePdf (RenderInvoicePdfRequest) returns (InvoicePdf);
+  // Staff action — bank-transfer settlement is recorded manually in v1, no payment provider wired.
+  rpc MarkPaid          (MarkPaidRequest)          returns (Invoice);
+  // OPEN or DRAFT only. A PAID invoice must be corrected with a credit note, never voided.
+  rpc VoidInvoice        (VoidInvoiceRequest)        returns (Invoice);
+}
+
+// ── BillingAccountService messages ──────────────────────────────────────────
+
+message GetBillingAccountRequest {
+  string org_id = 1;
+}
+
+message UpsertBillingAccountRequest {
+  string org_id = 1;
+  string legal_name = 2;
+  string tin = 3;              // СТИР / ИНН
+  string vat_code = 4;         // НДС код
+  string legal_address = 5;
+  string bank_name = 6;
+  string bank_account = 7;     // расчётный счёт
+  string bank_mfo = 8;         // МФО
+  string billing_email = 9;
+  string billing_phone = 10;
+  string country_code = 11;    // ISO 3166-1 alpha-2, default UZ
+  bool is_vat_payer = 12;
+}
+
+message BillingAccount {
+  string id = 1;
+  string org_id = 2;
+  string legal_name = 3;
+  string tin = 4;
+  string vat_code = 5;
+  string legal_address = 6;
+  string bank_name = 7;
+  string bank_account = 8;
+  string bank_mfo = 9;
+  string billing_email = 10;
+  string billing_phone = 11;
+  string country_code = 12;
+  string currency = 13;
+  bool is_vat_payer = 14;
+}
+
+// ── InvoiceService messages ─────────────────────────────────────────────────
+
+message CreateInvoiceRequest {
+  string org_id = 1;
+  string subscription_id = 2;
+  string invoice_type = 3;     // SUBSCRIPTION, SEAT_TOPUP, ADJUSTMENT
+  repeated InvoiceLineInput lines = 4;
+  google.protobuf.Timestamp period_start = 5;
+  google.protobuf.Timestamp period_end = 6;
+  google.protobuf.Timestamp due_at = 7;
+}
+
+// Pre-priced: billing-service computes subtotal/tax/total per line (HALF_UP, 2 decimals) from these,
+// but does NOT decide what the unit_amount or tax_percentage ARE — that pricing decision already
+// happened in subscription-service.
+message InvoiceLineInput {
+  string line_type = 1;        // SEAT, ADDON, PRORATION, DISCOUNT
+  string description = 2;
+  string plan_code = 3;
+  string quantity = 4;         // decimal string — PRORATION lines use fractional quantities
+  string unit_amount = 5;      // decimal string, may be negative (PRORATION credit)
+  string tax_percentage = 6;   // decimal string, e.g. "12.00"; "0.00" still renders a tax section
+  google.protobuf.Timestamp period_start = 7;
+  google.protobuf.Timestamp period_end = 8;
+}
+
+message ListInvoicesRequest {
+  string org_id = 1;
+  optional string status = 2;  // DRAFT, OPEN, PAID, VOID, UNCOLLECTIBLE
+  .org.sophie.common.PageRequest page = 3;
+}
+
+message ListInvoicesResponse {
+  repeated Invoice invoices = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message GetInvoiceRequest {
+  string invoice_id = 1;
+}
+
+message RenderInvoicePdfRequest {
+  string invoice_id = 1;
+}
+
+message InvoicePdf {
+  string file_id = 1;          // file-service reference, cached under the "billing" prefix
+  string download_url = 2;
+}
+
+message MarkPaidRequest {
+  string invoice_id = 1;
+  string amount = 2;           // decimal string
+  string bank_reference = 3;   // required — the bank payment order number
+  google.protobuf.Timestamp paid_at = 4;
+  string recorded_by_user_id = 5;
+  string reason = 6;
+}
+
+message VoidInvoiceRequest {
+  string invoice_id = 1;
+  string reason = 2;
+  string actor_user_id = 3;
+}
+
+message Invoice {
+  string id = 1;
+  string billing_account_id = 2;
+  string org_id = 3;
+  string subscription_id = 4;
+  string invoice_number = 5;   // INV-2026-000123, gapless
+  string status = 6;           // DRAFT, OPEN, PAID, VOID, UNCOLLECTIBLE
+  string invoice_type = 7;
+  string currency = 8;
+  string subtotal_amount = 9;
+  string tax_amount = 10;
+  string total_amount = 11;
+  string amount_paid = 12;
+  google.protobuf.Timestamp period_start = 13;
+  google.protobuf.Timestamp period_end = 14;
+  optional google.protobuf.Timestamp issued_at = 15;
+  optional google.protobuf.Timestamp due_at = 16;
+  optional google.protobuf.Timestamp paid_at = 17;
+  optional google.protobuf.Timestamp voided_at = 18;
+  repeated InvoiceLine lines = 19;
+}
+
+message InvoiceLine {
+  string id = 1;
+  string line_type = 2;
+  string description = 3;
+  string plan_code = 4;
+  string quantity = 5;
+  string unit_amount = 6;
+  string subtotal_amount = 7;
+  string tax_percentage = 8;
+  string tax_amount = 9;
+  string total_amount = 10;
+  optional google.protobuf.Timestamp period_start = 11;
+  optional google.protobuf.Timestamp period_end = 12;
+}
+
+// ── Staff-only admin surface (contract reserved, not yet implemented) ──────
+
+service BillingAdminService {
+  rpc ListInvoices (ListInvoicesRequest) returns (ListInvoicesResponse);
+}

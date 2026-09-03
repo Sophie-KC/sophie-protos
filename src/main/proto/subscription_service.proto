@@ -38,6 +38,14 @@ service SubscriptionService {
   // unchanged if the org already has one.
   rpc CreateFreeSubscription (CreateFreeSubscriptionRequest) returns (Subscription);
   rpc ListPlans (ListPlansRequest) returns (ListPlansResponse);
+
+  // No-write preview of what ChangePlan would do — same calculator ChangePlan itself calls, so the
+  // number a customer confirms and the number on the resulting invoice can never disagree (Phase 2
+  // prompt §5.1).
+  rpc PreviewPlanChange  (ChangePlanRequest)         returns (PlanChangePreview);
+  rpc ChangePlan         (ChangePlanRequest)         returns (Subscription);
+  rpc CancelSubscription (CancelSubscriptionRequest) returns (Subscription);
+  rpc ResumeSubscription (ResumeSubscriptionRequest) returns (Subscription);
 }
 
 // ── EntitlementService messages ─────────────────────────────────────────────
@@ -144,6 +152,59 @@ message Subscription {
   google.protobuf.Timestamp current_period_start = 10;
   google.protobuf.Timestamp current_period_end = 11;
   bool cancel_at_period_end = 12;
+  // Set by CancelSubscription only, when the org has more members than the plan it will drop to (Free)
+  // supports — the UI must surface this at confirm time (Phase 2 prompt §5.3): at period end the
+  // workspace goes read-only unless members are removed first.
+  bool excess_members_on_cancel_warning = 13;
+}
+
+// ── ChangePlan / PreviewPlanChange / CancelSubscription / ResumeSubscription ────────────────────
+
+message ChangePlanRequest {
+  string org_id = 1;
+  string plan_code = 2;
+  string billing_period = 3;    // MONTHLY | ANNUAL
+  int32 seats = 4;
+  optional string actor_user_id = 5;   // staff bypass of is_public omits this
+}
+
+message PlanChangePreview {
+  string target_plan_code = 1;
+  string billing_period = 2;
+  int32 seats = 3;
+  google.protobuf.Timestamp period_start = 4;
+  google.protobuf.Timestamp period_end = 5;
+  repeated PlanChangeLine lines = 6;
+  string subtotal_amount = 7;      // decimal string
+  string tax_amount = 8;           // decimal string
+  string total_amount = 9;         // decimal string
+  optional google.protobuf.Timestamp due_at = 10;
+  // When true, none of the fields above are meaningful — ChangePlan with the same request would be
+  // rejected FAILED_PRECONDITION. seats.max is below current_member_count (Phase 2 prompt §5.3).
+  bool blocked = 11;
+  string blocked_reason = 12;
+  optional int64 current_member_count = 13;
+  optional int64 max_seats = 14;
+  optional int64 excess_seats = 15;
+}
+
+message PlanChangeLine {
+  string line_type = 1;      // SEAT | PRORATION
+  string description = 2;
+  string quantity = 3;       // decimal string
+  string unit_amount = 4;    // decimal string, may be negative (PRORATION credit)
+  string tax_percentage = 5; // decimal string
+}
+
+message CancelSubscriptionRequest {
+  string org_id = 1;
+  bool at_period_end = 2;
+  optional string actor_user_id = 3;
+}
+
+message ResumeSubscriptionRequest {
+  string org_id = 1;
+  optional string actor_user_id = 2;
 }
 
 // ── Staff-only admin surfaces (contract reserved, not yet implemented) ─────
