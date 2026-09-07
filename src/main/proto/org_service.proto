@@ -75,6 +75,11 @@ service OrgService {
   rpc UpdateOrganization(UpdateOrganizationRequest) returns (Organization);
   rpc UpdateOrganizationStatus(UpdateOrganizationStatusRequest) returns (Organization);
   rpc GetMyOrganizationBySubdomain(GetMyOrganizationBySubdomainRequest) returns (OrganizationMembership);
+  // Pure subdomain -> org id lookup, no membership check at all (unlike GetMyOrganizationBySubdomain,
+  // which requires a user_id and enforces membership). Subdomains are public DNS and enumerable
+  // regardless, so this carries no new exposure — it's what api-gateway calls to establish "which org
+  // is this request for" from the Host header, BEFORE knowing anything about the caller. Trusted-internal.
+  rpc GetOrgIdBySubdomain(GetOrgIdBySubdomainRequest) returns (GetOrgIdBySubdomainResponse);
 
   // Role management — all mutating RPCs require requested_by_user_id to be the target org's Org Admin.
   rpc CreateRole(CreateRoleRequest) returns (Role);
@@ -137,13 +142,40 @@ service OrgService {
 }
 
 message ValidateSessionRequest {
-  string keycloak_user_id = 1;
+  string keycloak_sub = 1;
+  // Org to resolve membership/permissions/admin status for. Empty = identity-only resolution:
+  // translate keycloak_sub to org-service's internal user id, with role_ids/permissions/
+  // is_org_admin unset and membership_status = NOT_REQUESTED. Every caller that only needs
+  // "what's my internal user id" (most of api-gateway's pre-existing call sites) keeps using this
+  // mode unchanged; a caller that has resolved an org (e.g. api-gateway, from the request's Host
+  // header subdomain via GetOrgIdBySubdomain) passes it to get the full per-org authorization
+  // context in the same round trip.
+  string org_id = 2;
+}
+
+enum MembershipStatus {
+  MEMBERSHIP_STATUS_UNSPECIFIED = 0;
+  NOT_REQUESTED = 1;       // org_id was empty on the request
+  ACTIVE = 2;               // matches OrgMembershipService#isOrgMember's ACTIVE-only definition
+  PENDING_ACTIVATION = 3;   // provisioned but not yet activated — not a member yet, see isOrgMember
+  NOT_A_MEMBER = 4;
 }
 
 message ValidateSessionResponse {
+  // True iff keycloak_sub resolves to a real Org Service user record — independent of org_id/
+  // membership. False means Org Service has no user for this keycloak identity at all.
   bool valid = 1;
   string user_id = 2;
   string org_id = 3;
+  // ORG-scope role assignment ids the user holds in org_id — empty when membership_status isn't
+  // ACTIVE, or when org_id was empty.
+  repeated string role_ids = 4;
+  // Permission keys the user holds at ORG scope in org_id (every key in the catalog when
+  // is_org_admin — an Org Admin implicitly holds all permissions, matching RoleService#hasPermission's
+  // early-admin-return). Empty when membership_status isn't ACTIVE, or when org_id was empty.
+  repeated string permissions = 5;
+  bool is_org_admin = 6;
+  MembershipStatus membership_status = 7;
 }
 
 message CreateOrganizationRequest {
@@ -381,6 +413,15 @@ message UpdateOrganizationStatusRequest {
 message GetMyOrganizationBySubdomainRequest {
   string user_id = 1; // org-service internal user id
   string subdomain = 2;
+}
+
+message GetOrgIdBySubdomainRequest {
+  string subdomain = 1;
+}
+
+message GetOrgIdBySubdomainResponse {
+  bool found = 1;
+  string org_id = 2; // empty when found = false
 }
 
 // ===================== Roles =====================
