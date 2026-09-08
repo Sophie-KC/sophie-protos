@@ -9,7 +9,7 @@ group = 'org.sophie'
 // -PreleaseVersion=<tag without the leading v> so the PUBLISHED version comes from the git tag, and it
 // asserts the tag equals DECLARED_VERSION first (fails otherwise) — so a v0.2.0 tag can never publish
 // while build.gradle still says 0.1.0. Local publishToMavenLocal (no -P) uses DECLARED_VERSION as-is.
-ext.DECLARED_VERSION = '0.26.0'
+ext.DECLARED_VERSION = '0.26.1'
 version = project.findProperty('releaseVersion') ?: DECLARED_VERSION
 description = 'sophie-protos — single source of truth for all sophie gRPC contracts'
 
@@ -79,6 +79,45 @@ jar {
 tasks.register('printVersion') {
     doLast { println DECLARED_VERSION }
 }
+
+// Provenance guard: 0.26.0 was published to mavenLocal from a working tree with unrelated,
+// still-uncommitted changes mixed in (two other services' proto additions that hadn't landed on
+// this repo's own master) — the resulting jar corresponded to no commit in this repo's history, and
+// consumers built against it silently carried contract pieces nobody could look up in git. Every
+// task that publishes anything (mavenLocal or the real registry) now refuses to run against a dirty
+// tree. Bypass only for a deliberate one-off with -PallowDirtyPublish=true; there is no other escape
+// hatch, and using it means accepting the exact problem this guard exists to prevent.
+def checkCleanTreeForPublish = tasks.register('checkCleanTreeForPublish') {
+    doLast {
+        if (project.hasProperty('allowDirtyPublish')) {
+            logger.warn('WARNING: publishing from a working tree that may be dirty (-PallowDirtyPublish) — ' +
+                    'the resulting jar may not correspond to any commit.')
+            return
+        }
+        def execOutput = providers.exec {
+            commandLine 'git', 'status', '--porcelain'
+            ignoreExitValue = true
+        }
+        def exitValue = execOutput.result.get().exitValue
+        def status = execOutput.standardOutput.asText.get()
+        if (exitValue != 0) {
+            throw new GradleException(
+                    "Could not determine git status (exit ${exitValue}) — refusing to publish. " +
+                    "Run from inside the sophie-protos git working copy, or pass -PallowDirtyPublish=true " +
+                    "to publish anyway (NOT recommended — see this task's comment in build.gradle).")
+        }
+        if (status.trim()) {
+            throw new GradleException(
+                    "Working tree is dirty — refusing to publish a jar that corresponds to no commit:\n" +
+                    status +
+                    "\nCommit or stash these changes first, or pass -PallowDirtyPublish=true to publish " +
+                    "anyway (NOT recommended — see this task's comment in build.gradle).")
+        }
+    }
+}
+
+tasks.withType(PublishToMavenLocal).configureEach { dependsOn checkCleanTreeForPublish }
+tasks.withType(PublishToMavenRepository).configureEach { dependsOn checkCleanTreeForPublish }
 
 publishing {
     publications {
