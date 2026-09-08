@@ -46,6 +46,15 @@ service SubscriptionService {
   rpc ChangePlan         (ChangePlanRequest)         returns (ChangePlanResponse);
   rpc CancelSubscription (CancelSubscriptionRequest) returns (Subscription);
   rpc ResumeSubscription (ResumeSubscriptionRequest) returns (Subscription);
+
+  // Dev/test-only: resets an org's subscription back to a clean Free-tier state (plan, billing
+  // period, period dates, status, seats_purchased) so a hand-verification org (e.g. e2e's "acme")
+  // can be re-used to exercise Free-tier limits after being upgraded during manual testing.
+  // subscription-service refuses this call outright unless it was started with
+  // sophie.subscription.dev-reset-enabled=true (never true in production defaults) — the RPC itself
+  // does not exist on the server when that property is unset, so this returns UNIMPLEMENTED rather
+  // than doing anything in any environment that hasn't explicitly opted in.
+  rpc DevResetOrgToFree (DevResetOrgToFreeRequest) returns (google.protobuf.Empty);
 }
 
 // ── EntitlementService messages ─────────────────────────────────────────────
@@ -216,6 +225,11 @@ message CancelSubscriptionRequest {
 message ResumeSubscriptionRequest {
   string org_id = 1;
   optional string actor_user_id = 2;
+}
+
+// Dev/test-only — see DevResetOrgToFree above.
+message DevResetOrgToFreeRequest {
+  string org_id = 1;
 }
 
 // ── Staff-only admin surfaces (contract reserved, not yet implemented) ─────
