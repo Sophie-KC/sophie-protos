@@ -43,7 +43,7 @@ service SubscriptionService {
   // number a customer confirms and the number on the resulting invoice can never disagree (Phase 2
   // prompt §5.1).
   rpc PreviewPlanChange  (ChangePlanRequest)         returns (PlanChangePreview);
-  rpc ChangePlan         (ChangePlanRequest)         returns (Subscription);
+  rpc ChangePlan         (ChangePlanRequest)         returns (ChangePlanResponse);
   rpc CancelSubscription (CancelSubscriptionRequest) returns (Subscription);
   rpc ResumeSubscription (ResumeSubscriptionRequest) returns (Subscription);
 }
@@ -159,6 +159,17 @@ message Subscription {
 }
 
 // ── ChangePlan / PreviewPlanChange / CancelSubscription / ResumeSubscription ────────────────────
+
+// Phase 3 closeout §2: ChangePlan's invoice is created asynchronously (the outbox guarantee is worth
+// more than a synchronous call — see subscription.invoice_requested below), so the response can't
+// carry the invoice itself. invoice_request_id is the correlation id the caller polls
+// GetInvoiceByRequestId with until the async consumer has created the real invoice. Unset when this
+// plan change didn't request an invoice at all (a scheduled downgrade, or an immediate change with no
+// billable lines) — there is nothing to poll for.
+message ChangePlanResponse {
+  Subscription subscription = 1;
+  optional string invoice_request_id = 2;
+}
 
 message ChangePlanRequest {
   string org_id = 1;
