@@ -26,6 +26,10 @@ service InvoiceService {
   rpc CreateInvoice    (CreateInvoiceRequest)    returns (Invoice);
   rpc ListInvoices     (ListInvoicesRequest)     returns (ListInvoicesResponse);
   rpc GetInvoice        (GetInvoiceRequest)       returns (Invoice);
+  // Phase 3 closeout §2: NOT_FOUND while the async subscription.invoice_requested consumer hasn't
+  // created the invoice yet — the caller (api-gateway, on behalf of the frontend's post-upgrade poll)
+  // treats that as "still preparing," not an error.
+  rpc GetInvoiceByRequestId (GetInvoiceByRequestIdRequest) returns (Invoice);
   rpc RenderInvoicePdf (RenderInvoicePdfRequest) returns (InvoicePdf);
   // Staff action — bank-transfer settlement is recorded manually in v1, no payment provider wired.
   rpc MarkPaid          (MarkPaidRequest)          returns (Invoice);
@@ -112,6 +116,10 @@ message GetInvoiceRequest {
   string invoice_id = 1;
 }
 
+message GetInvoiceByRequestIdRequest {
+  string invoice_request_id = 1;
+}
+
 message RenderInvoicePdfRequest {
   string invoice_id = 1;
 }
@@ -156,6 +164,10 @@ message Invoice {
   optional google.protobuf.Timestamp paid_at = 17;
   optional google.protobuf.Timestamp voided_at = 18;
   repeated InvoiceLine lines = 19;
+  // Phase 3 closeout §2: set only for an invoice created from a ChangePlan-initiated
+  // subscription.invoice_requested event — unset for period-close renewal invoices, which mint no
+  // correlation id (nothing synchronous is waiting on them).
+  optional string invoice_request_id = 20;
 }
 
 message InvoiceLine {
