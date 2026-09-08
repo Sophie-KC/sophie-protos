@@ -49,6 +49,18 @@ service FileService {
   rpc GetAvatar(GetAvatarRequest) returns (Avatar);
   rpc DeleteAvatar(DeleteAvatarRequest) returns (google.protobuf.Empty);
   rpc StreamAvatar(StreamAvatarRequest) returns (stream AvatarChunk);
+
+  // Dev/test-only (Phase 3 closeout §5) — force-purges every live file a test org holds, regardless
+  // of references or GC grace period, so storage.total.gb can be exercised from zero again. See
+  // subscription-service's DevResetOrgToFree for the sibling RPC and its own ConditionalOnProperty
+  // pattern; unimplemented (falls through to UNIMPLEMENTED) everywhere sophie.files.dev-reset-enabled
+  // isn't explicitly true.
+  rpc DevResetOrgStorage(DevResetOrgStorageRequest) returns (google.protobuf.Empty);
+}
+
+// Dev/test-only — see DevResetOrgStorage above.
+message DevResetOrgStorageRequest {
+  string org_id = 1;
 }
 
 message File {
