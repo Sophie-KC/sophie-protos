@@ -138,6 +138,12 @@ message Plan {
   bool is_free = 6;
   bool is_public = 7;
   repeated PlanPrice prices = 8;
+  // Phase 3 closeout §3.2: this plan's own entitlement limits (default + plan-overlay resolution,
+  // same EntitlementValue shape GetEntitlements returns) — no org, no override layer, no
+  // subscription_status/access_mode, since a bare catalog entry has neither. Lets the Plan Comparison
+  // modal read real limits instead of hand-mirroring the seed SQL, which drifts the first time a plan
+  // changes.
+  map<string, EntitlementValue> entitlements = 9;
 }
 
 message PlanPrice {
