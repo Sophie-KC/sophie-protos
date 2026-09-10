@@ -147,6 +147,22 @@ service OrgService {
   // members = ACTIVE + PENDING_ACTIVATION org_members rows (same definition org-service's own seat
   // enforcement uses); guests are never counted (design doc §1 — guests don't consume a seat).
   rpc GetOrgSeatCount(GetOrgSeatCountRequest) returns (GetOrgSeatCountResponse);
+
+  // Personal API tokens (api-tokens-design.md). Mint a new token for user_id/org_id — user_id/org_id
+  // come from the caller's own already-verified session, never a client-suppliable field, same
+  // anti-spoofing rule CreateOrganization's created_by_user_id follows. Returns the plaintext token
+  // exactly once; only its hash is ever persisted.
+  rpc CreateApiToken(CreateApiTokenRequest) returns (CreateApiTokenResponse);
+  // Lists a user's own tokens (never another user's) within one org — name/scopes/timestamps only,
+  // never the token value itself post-issuance.
+  rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse);
+  rpc RevokeApiToken(RevokeApiTokenRequest) returns (google.protobuf.Empty);
+  // Trusted-internal, no user JWT (SERVICE-tier — this IS the identity-establishing call for a PAT
+  // request, called from api-gateway's ApiTokenAuthenticationFilter before any user identity exists
+  // on that request). Mirrors ValidateSessionResponse's shape deliberately: a token must be checked
+  // against CURRENT membership/permissions on every use, not whatever was true at issue time, so
+  // revoking org access actually revokes programmatic access too.
+  rpc ValidateApiToken(ValidateApiTokenRequest) returns (ValidateApiTokenResponse);
 }
 
 message ValidateSessionRequest {
@@ -744,4 +760,58 @@ message SetOrgAvatarRequest {
 
 message RemoveOrgAvatarRequest {
   string org_id = 1;
+}
+
+message CreateApiTokenRequest {
+  // From the caller's own resolved session (api-gateway), never client body — same rule as
+  // CreateOrganizationRequest.created_by_user_id.
+  string user_id = 1;
+  string org_id = 2;
+  string name = 3;
+  repeated string scopes = 4;   // "task:create", "doc:create" today; a set, not a fixed enum
+  optional string expires_at = 5; // ISO-8601 instant; unset = no expiry
+}
+
+message CreateApiTokenResponse {
+  string id = 1;
+  string token = 2;          // plaintext — returned exactly once, never persisted or re-readable
+  string token_prefix = 3;
+}
+
+message ListApiTokensRequest {
+  string user_id = 1;
+  string org_id = 2;
+}
+
+message ListApiTokensResponse {
+  repeated ApiTokenSummary tokens = 1;
+}
+
+message ApiTokenSummary {
+  string id = 1;
+  string name = 2;
+  string token_prefix = 3;
+  repeated string scopes = 4;
+  google.protobuf.Timestamp created_at = 5;
+  optional google.protobuf.Timestamp last_used_at = 6;
+  optional google.protobuf.Timestamp expires_at = 7;
+}
+
+message RevokeApiTokenRequest {
+  // Caller (SophieSecurityContext) must own token_id — revoking another user's token is refused,
+  // same ownership check ChangeMemberRole-style admin RPCs use for their own scope.
+  string token_id = 1;
+}
+
+message ValidateApiTokenRequest {
+  string token_hash = 1;   // sha256 hex of the presented token; org-service never sees the plaintext
+}
+
+message ValidateApiTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string org_id = 3;
+  repeated string scopes = 4;
+  repeated string permissions = 5;
+  MembershipStatus membership_status = 6;
 }
