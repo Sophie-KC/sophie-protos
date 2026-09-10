@@ -763,13 +763,13 @@ message RemoveOrgAvatarRequest {
 }
 
 message CreateApiTokenRequest {
-  // From the caller's own resolved session (api-gateway), never client body — same rule as
-  // CreateOrganizationRequest.created_by_user_id.
-  string user_id = 1;
-  string org_id = 2;
-  string name = 3;
-  repeated string scopes = 4;   // "task:create", "doc:create" today; a set, not a fixed enum
-  optional string expires_at = 5; // ISO-8601 instant; unset = no expiry
+  // No user id field — the owner is always SophieSecurityContext.currentInternalUserId(), same
+  // convention RemoveUserAvatarRequest uses (a user may only act on their own tokens/avatar; there's
+  // no "whose" to ask the client for).
+  string org_id = 1;
+  string name = 2;
+  repeated string scopes = 3;   // "task:create", "doc:create" today; a set, not a fixed enum
+  optional string expires_at = 4; // ISO-8601 instant; unset = no expiry
 }
 
 message CreateApiTokenResponse {
@@ -779,8 +779,7 @@ message CreateApiTokenResponse {
 }
 
 message ListApiTokensRequest {
-  string user_id = 1;
-  string org_id = 2;
+  string org_id = 1;
 }
 
 message ListApiTokensResponse {
