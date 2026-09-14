@@ -96,6 +96,10 @@ service OrgService {
   rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
 
   rpc AssignRole(AssignRoleRequest) returns (RoleAssignment);
+  // In-place role swap for an existing assignment (same user/scope, different role) — avoids the
+  // revoke-then-assign race where the assignment briefly doesn't exist. Same Org-Admin gate as
+  // AssignRole/RevokeRoleAssignment; new role must belong to the same org and scope_type.
+  rpc UpdateRoleAssignment(UpdateRoleAssignmentRequest) returns (RoleAssignment);
   rpc RevokeRoleAssignment(RevokeRoleAssignmentRequest) returns (google.protobuf.Empty);
   rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse);
 
@@ -523,6 +527,11 @@ message AssignRoleRequest {
   string role_id = 3;
   string scope_type = 4;           // must equal the role's scope_type
   string scope_id = 5;             // empty for ORG scope
+}
+
+message UpdateRoleAssignmentRequest {
+  string assignment_id = 1;
+  string role_id = 2;         // new role; must belong to the same org and match the assignment's scope_type
 }
 
 message RevokeRoleAssignmentRequest {
