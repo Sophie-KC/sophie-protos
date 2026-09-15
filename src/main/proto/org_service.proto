@@ -142,8 +142,26 @@ service OrgService {
 
   // Staff-tier, not a member-facing RPC — every org platform-wide, not "my orgs" (ListMyOrganizations
   // above). Added for subscription-service's SubscriptionBackfillRunner (subscriptions Phase 2 §0.2),
-  // which pages through every org to find the ones with no subscription row yet.
+  // which pages through every org to find the ones with no subscription row yet. Now also the admin
+  // panel's real Organizations list (query added below) — same RPC, same tier, a second caller.
   rpc ListOrganizations(ListOrganizationsRequest) returns (ListOrganizationsResponse);
+
+  // Staff-tier. Single-org lookup for the admin panel's Organization detail screen — ListOrganizations
+  // above is page-at-a-time and has no by-id fetch.
+  rpc GetOrganizationForStaff(GetOrganizationForStaffRequest) returns (Organization);
+
+  // ── Platform staff management (admin-panel-design-prompt.md's Staff screen) ─────────────────
+  // Staff-tier, PLATFORM_ADMIN only (org-service enforces the role itself — never trust a
+  // caller-supplied role). The caller's own identity comes from the gRPC principal
+  // (SophieSecurityContext's StaffPrincipal), never a request field.
+
+  rpc ListStaff(google.protobuf.Empty) returns (ListStaffResponse);
+  rpc InviteStaff(InviteStaffRequest) returns (PlatformStaffMember);
+  rpc ChangeStaffRole(ChangeStaffRoleRequest) returns (PlatformStaffMember);
+  // Self-demotion guard (admin-panel-design-prompt.md's SelfDemotionGuardCard): org-service refuses
+  // this when the caller is deactivating themselves AND is the last ACTIVE PLATFORM_ADMIN — a
+  // platform with zero admins can never re-admin itself.
+  rpc DeactivateStaff(DeactivateStaffRequest) returns (PlatformStaffMember);
 
   // Trusted-internal, no identity field — same tier as IsOrgMember. Added for subscription-service's
   // ChangePlan (subscriptions Phase 2b §2): seats requested on a plan change must never be set below
@@ -404,11 +422,50 @@ message ListOrganizationsRequest {
   // Keyset on created_at ASC then id (tiebreaker), so a backfill run started while orgs are still
   // being created never skips or duplicates a row. Default direction FORWARD.
   .org.sophie.common.PageRequest page = 1;
+  // Case-insensitive substring match against name OR subdomain. Empty means unfiltered — the
+  // backfill runner's own caller never sets this.
+  string query = 2;
 }
 
 message ListOrganizationsResponse {
   repeated Organization organizations = 1;
   .org.sophie.common.PageResponse page = 2;
+}
+
+message GetOrganizationForStaffRequest {
+  string org_id = 1;
+}
+
+message PlatformStaffMember {
+  string id = 1;
+  string keycloak_user_id = 2;
+  string email = 3;
+  string first_name = 4;
+  string last_name = 5;
+  string role = 6;          // PLATFORM_ADMIN | BILLING_STAFF | SUPPORT
+  string status = 7;        // ACTIVE | DEACTIVATED
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp deactivated_at = 9; // unset while ACTIVE
+}
+
+message ListStaffResponse {
+  repeated PlatformStaffMember staff = 1;
+}
+
+message InviteStaffRequest {
+  string email = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string role = 4; // PLATFORM_ADMIN | BILLING_STAFF | SUPPORT
+}
+
+message ChangeStaffRoleRequest {
+  string staff_id = 1;
+  string role = 2;
+}
+
+message DeactivateStaffRequest {
+  string staff_id = 1;
 }
 
 message GetOrgSeatCountRequest {
