@@ -663,6 +663,11 @@ message PageTemplate {
 
 message ListPageTemplatesRequest {
   string space_id = 1;
+  // Which locale's copy of the platform built-ins to return (page-templates design §7) — the
+  // frontend's own current i18n locale, not derived from the org (doc-service has no org-locale
+  // client call today, and the picker should honor the viewer's own language choice regardless of
+  // the org's default anyway). Falls back to "en" if blank or unrecognized.
+  string locale = 2;
 }
 
 message ListPageTemplatesResponse {
