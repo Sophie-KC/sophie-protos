@@ -404,7 +404,11 @@ message ListPageVersionsRequest {
 }
 
 message ListPageVersionsResponse {
-  repeated PageVersionMeta versions = 1; // newest first (version_number DESC)
+  repeated PageVersionMeta versions = 1; // newest first (version_number DESC), already filtered to
+                                          // docs.version.retention.days — the current version is
+                                          // always included regardless of age
+  bool history_truncated = 2;   // true when older versions exist but are hidden by the plan's retention window
+  optional google.protobuf.Timestamp truncated_at = 3; // the cutoff applied above, when history_truncated is true
 }
 
 message GetPageVersionRequest {
