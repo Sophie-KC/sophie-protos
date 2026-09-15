@@ -113,6 +113,19 @@ service DocService {
   // Requires space.manage. Caller identity comes from the gRPC principal, never the body.
   rpc SetSpaceAvatar(SetSpaceAvatarRequest) returns (Space);
   rpc RemoveSpaceAvatar(RemoveSpaceAvatarRequest) returns (Space);
+
+  // ── Page templates (claude/page-templates-implementation-prompt.md) ────────────────────────
+  // Built-ins (space_id absent) plus this space's own custom templates. Never paginated — a
+  // space's template list is small by design (the picker is a grid, not an infinite list).
+  rpc ListPageTemplates(ListPageTemplatesRequest) returns (ListPageTemplatesResponse);
+  rpc GetPageTemplate(GetPageTemplateRequest) returns (PageTemplate);
+  // Management RPCs require space.manage (SpaceGuard#loadWithManageAccess) and reject built-ins.
+  rpc CreatePageTemplate(CreatePageTemplateRequest) returns (PageTemplate);
+  rpc UpdatePageTemplate(UpdatePageTemplateRequest) returns (PageTemplate);
+  rpc DeletePageTemplate(DeletePageTemplateRequest) returns (google.protobuf.Empty);
+  rpc SavePageAsTemplate(SavePageAsTemplateRequest) returns (PageTemplate);
+  // Ordinary page-create access (same gate as CreatePage) — using a template is not a management action.
+  rpc CreatePageFromTemplate(CreatePageFromTemplateRequest) returns (Page);
 }
 
 message Space {
@@ -629,4 +642,81 @@ message SetSpaceAvatarRequest {
 
 message RemoveSpaceAvatarRequest {
   string space_id = 1;
+}
+
+// ===================== Page templates =====================
+
+message PageTemplate {
+  string id = 1;
+  string org_id = 2;
+  optional string space_id = 3;    // absent = platform built-in, visible from every space
+  string scope = 4;                // BUILT_IN | SPACE (ORG reserved, unused in v1)
+  string name = 5;
+  string description = 6;
+  optional string icon = 7;        // lucide icon name, for the picker
+  string content = 8;              // TipTap JSON — may contain templateVariable nodes
+  string variables = 9;            // JSON array of declared variables (kind/type/label/required/...)
+  optional string created_by = 10; // absent for built-ins
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+message ListPageTemplatesRequest {
+  string space_id = 1;
+}
+
+message ListPageTemplatesResponse {
+  repeated PageTemplate templates = 1; // built-ins first, then this space's own, each name-ordered
+}
+
+message GetPageTemplateRequest {
+  string template_id = 1;
+}
+
+message CreatePageTemplateRequest {
+  string space_id = 1;
+  string name = 2;
+  string description = 3;
+  optional string icon = 4;
+  string content = 5;
+  string variables = 6;
+}
+
+message UpdatePageTemplateRequest {
+  string template_id = 1;
+  string name = 2;
+  string description = 3;
+  optional string icon = 4;
+  string content = 5;
+  string variables = 6;
+}
+
+message DeletePageTemplateRequest {
+  string template_id = 1;
+}
+
+// Copies the page's CURRENT published content verbatim, with zero declared variables — turning prose
+// into variables is a manual edit afterward (module design's own rule: auto-detection guesses wrong).
+message SavePageAsTemplateRequest {
+  string page_id = 1;
+  string name = 2;
+  string description = 3;
+  optional string icon = 4;
+}
+
+// One value per declared variable key. Which field is meaningful depends on that variable's OWN
+// declared type (resolved server-side from the template, never re-asserted by the client):
+// TEXT/DATE/SELECT read text_value; USER reads the first user_ids entry; USER_LIST reads all of them.
+message TemplateVariableValue {
+  string key = 1;
+  string text_value = 2;
+  repeated string user_ids = 3;
+}
+
+message CreatePageFromTemplateRequest {
+  string space_id = 1;
+  optional string parent_page_id = 2;
+  string title = 3;
+  string template_id = 4;
+  repeated TemplateVariableValue variable_values = 5;
 }
