@@ -185,8 +185,33 @@ message InvoiceLine {
   optional google.protobuf.Timestamp period_end = 12;
 }
 
-// ── Staff-only admin surface (contract reserved, not yet implemented) ──────
-
+// BillingAdminService: the admin panel's read-only Invoices screen (list + detail core fields
+// only — MarkPaid/VoidInvoice/credit notes/PDF stay customer-facing-only for now, called by
+// api-gateway's BillingController on a real customer's behalf, never by the admin panel). Callers
+// are platform staff (a StaffPrincipal, resolved from the isolated sophie-staff realm's JWT — see
+// sophie-common-security's dual-verifier support and subscription-service's own
+// StaffJwtVerifierConfig for the pattern billing-service now mirrors) — every RPC here rejects
+// anyone who isn't a ServicePrincipal or StaffPrincipal explicitly in the handler, the same shape
+// as subscription-service's own SubscriptionAdminService, since a USER-tier PrincipalTierPolicy
+// entry alone can't distinguish "staff" from "an ordinary customer."
+//
+// Deliberately reuses InvoiceService's own ListInvoicesResponse/Invoice messages (this is a
+// different query shape, not a different resource), but NOT its ListInvoicesRequest — that message
+// requires org_id, which a cross-org staff list has no single value for.
+//
+// Deliberately does NOT re-verify the caller against a live platform_staff row (that table lives in
+// org-service's DB, not this service's) — a deactivated staff member's still-unexpired JWT could
+// read invoice data until it naturally expires. Read-only, low-severity, and a known, accepted gap
+// for this pass, same as SubscriptionAdminService's.
 service BillingAdminService {
-  rpc ListInvoices (ListInvoicesRequest) returns (ListInvoicesResponse);
+  rpc ListInvoices (ListInvoicesForStaffRequest) returns (ListInvoicesResponse);
+  rpc GetInvoiceForStaff (GetInvoiceForStaffRequest) returns (Invoice);
+}
+
+message ListInvoicesForStaffRequest {
+  .org.sophie.common.PageRequest page = 1;
+}
+
+message GetInvoiceForStaffRequest {
+  string invoice_id = 1;
 }
