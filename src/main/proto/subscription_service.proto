@@ -241,8 +241,79 @@ message DevResetOrgToFreeRequest {
 
 // ── Staff-only admin surfaces (contract reserved, not yet implemented) ─────
 
+// PlanAdminService: the admin panel's Plans screen — an entitlement-MATRIX editor (FREE/PRO/BUSINESS
+// x entitlement keys), not a plan-catalog CRUD surface (SubscriptionService.ListPlans already covers
+// reading plan/price/entitlement data, and is already reachable by a StaffPrincipal — it's a global,
+// non-org-scoped catalog read with no staff-specific gate). GetPlanMatrix duplicates none of that:
+// it returns the SAME per-plan resolved entitlement values (via EntitlementResolver, the identical
+// logic ListPlans itself calls) reshaped into the {keys, matrix} form the admin-web Plans screen
+// renders, PLUS the entitlement_key catalog's own metadata (description/valueType/enforcingService),
+// which ListPlans's response has no room for and no other RPC exposes at all.
+//
+// GetPlanMatrix follows the same staff-tier read pattern as SubscriptionAdminService/
+// BillingAdminService: any ServicePrincipal or StaffPrincipal, no live platform_staff re-check
+// (read-only, low-severity, same accepted gap).
+//
+// UpdatePlanEntitlements/CreateEntitlementKey are different: real writes with real platform-wide
+// consequence, so they hold a NEW, stricter bar this admin-panel effort hasn't needed until now —
+// StaffPrincipal ONLY (no ServicePrincipal bypass; no legitimate internal service ever mutates the
+// entitlement matrix on its own), AND a live re-check against org-service's platform_staff table
+// (via GetOrgSeatCount's sibling ListStaff RPC, reached through the SAME raw-JWT auto-forwarding
+// every other cross-service call on this platform already relies on — see
+// sophie-common-security's IdentityForwardingClientInterceptor) requiring the caller be an ACTIVE
+// PLATFORM_ADMIN, never trusting the StaffPrincipal JWT's own role claim alone (mirrors org-service's
+// own StaffAuth.requirePlatformAdmin() precedent for its Staff-management RPCs). Both writes also
+// append a real admin_audit_log row (that table has existed, unmapped, since V1 — Audit Log itself
+// stays out of scope for this pass, so nothing reads these rows back yet, but every write from this
+// point on leaves a genuine trail for whenever that module gets wired).
+//
+// Every cell value on the wire is a plain string, matching the admin-web frontend's own existing
+// convention: "true"/"false" for BOOLEAN, a plain numeric string for NUMBER, "-1" as the Unlimited
+// sentinel (mirrors plan_entitlement.is_unlimited, translated to a string here purely so the wire
+// shape matches what the frontend already expects cell-for-cell).
 service PlanAdminService {
-  rpc ListPlans (google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc GetPlanMatrix (google.protobuf.Empty) returns (PlanMatrixResponse);
+  rpc UpdatePlanEntitlements (UpdatePlanEntitlementsRequest) returns (PlanMatrixResponse);
+  rpc CreateEntitlementKey (CreateEntitlementKeyRequest) returns (PlanMatrixResponse);
+}
+
+message EntitlementKeyDefinition {
+  string key = 1;
+  string description = 2;
+  string value_type = 3;          // BOOLEAN | NUMBER
+  bool unlimited_supported = 4;
+  string owner_service = 5;
+}
+
+message EntitlementMatrixRow {
+  string key = 1;
+  map<string, string> value_by_plan_code = 2; // "FREE"/"PRO"/"BUSINESS" -> cell value string
+}
+
+message PlanMatrixResponse {
+  repeated EntitlementKeyDefinition keys = 1;
+  repeated EntitlementMatrixRow rows = 2;
+}
+
+message PlanEntitlementEdit {
+  string key = 1;
+  string plan_code = 2;
+  string value = 3;
+}
+
+message UpdatePlanEntitlementsRequest {
+  repeated PlanEntitlementEdit edits = 1;
+  string reason = 2;
+}
+
+message CreateEntitlementKeyRequest {
+  string key = 1;
+  string description = 2;
+  string value_type = 3;          // BOOLEAN | NUMBER
+  bool unlimited_supported = 4;
+  string default_value = 5;       // "-1" allowed when unlimited_supported
+  string owner_service = 6;
+  string reason = 7;
 }
 
 // SubscriptionAdminService: the admin panel's read-only Subscriptions screen (list + detail core
