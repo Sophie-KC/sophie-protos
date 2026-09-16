@@ -7,6 +7,7 @@ option java_package = "org.sophie.subscriptionservice.grpc";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "common/pagination.proto";
 
 // Subscription Service: owns plans, prices, entitlements, and the per-org subscription lifecycle.
 // Entitlement checks are on the hot path of every module (invite a member, upload a file, create a
@@ -244,8 +245,35 @@ service PlanAdminService {
   rpc ListPlans (google.protobuf.Empty) returns (google.protobuf.Empty);
 }
 
+// SubscriptionAdminService: the admin panel's read-only Subscriptions screen (list + detail core
+// fields only — no writes yet; ChangePlan/CancelSubscription/entitlement-override RPCs stay
+// customer-facing-only for now). Callers are platform staff (a StaffPrincipal, resolved from the
+// isolated sophie-staff realm's JWT — see sophie-common-security's dual-verifier support and
+// org-service's StaffJwtVerifierConfig for the pattern subscription-service now mirrors) — every
+// RPC here rejects anyone who isn't a ServicePrincipal or StaffPrincipal explicitly in the handler,
+// the same shape as org-service's own ListOrganizations/GetOrganizationForStaff, since a USER-tier
+// PrincipalTierPolicy entry alone can't distinguish "staff" from "an ordinary customer."
+//
+// Deliberately does NOT re-verify the caller against a live platform_staff row the way org-service's
+// own staff RPCs do (that table lives in org-service's DB, not this service's) — a deactivated staff
+// member's still-unexpired JWT could read subscription data until it naturally expires. Read-only,
+// low-severity, and a known, accepted gap for this pass; tracked, not silently glossed over.
 service SubscriptionAdminService {
-  rpc ListSubscriptions (google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc ListSubscriptions (ListSubscriptionsRequest) returns (ListSubscriptionsResponse);
+  rpc GetSubscriptionForStaff (GetSubscriptionForStaffRequest) returns (Subscription);
+}
+
+message ListSubscriptionsRequest {
+  .org.sophie.common.PageRequest page = 1;
+}
+
+message ListSubscriptionsResponse {
+  repeated Subscription subscriptions = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message GetSubscriptionForStaffRequest {
+  string org_id = 1;
 }
 
 service PlatformMetricsService {
