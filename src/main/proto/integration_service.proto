@@ -124,4 +124,9 @@ message GetAccessTokenRequest {
 message GetAccessTokenResponse {
   string access_token = 1;
   google.protobuf.Timestamp expires_at = 2;
+  // Internal user id that owns this connection (Connection.connected_by). Lets a caller that has no
+  // per-request identity of its own (e.g. calendar-service's background poll job) re-verify ownership
+  // on every call, rather than trusting a check done once at connect time — see
+  // GoogleCalendarSyncService.pollConnection in calendar-service for why that trust was misplaced.
+  string connected_by = 3;
 }
