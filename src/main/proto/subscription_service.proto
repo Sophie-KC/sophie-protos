@@ -479,6 +479,49 @@ message CancelScheduledPriceChangeRequest {
   string reason = 2;
 }
 
+// AuditAdminService: the admin panel's Audit Log screen, over admin_audit_log — a table that has
+// existed since V1 and is now written to by PlanAdminService/PricingAdminService (see their own
+// proto docs), but had no read RPC at all until now. Read-only, same staff-tier pattern as every
+// other read-only admin surface (any ServicePrincipal or StaffPrincipal, no live platform_staff
+// re-check) — there is nothing to write here, so no PLATFORM_ADMIN-only tier applies.
+//
+// This surfaces ONLY what admin_audit_log actually contains today: real rows exist solely for
+// Plans/Pricing writes (platform-wide, org_id always null) — Staff/Subscriptions/Invoices actions
+// have no real audit trail anywhere on the platform yet (org-service and billing-service each lack
+// the writer, even where billing-service already has the identical unmapped table). A future pass
+// wiring those services' own writers would land in their own respective tables, not this one.
+service AuditAdminService {
+  rpc ListAuditLog (ListAuditLogRequest) returns (ListAuditLogResponse);
+  rpc GetAuditLogEntry (GetAuditLogEntryRequest) returns (AuditLogEntry);
+}
+
+message AuditLogEntry {
+  string id = 1;                       // bigserial, as a string
+  string actor_user_id = 2;
+  string actor_email = 3;
+  string action = 4;
+  string target_type = 5;
+  optional string target_id = 6;       // unset when the target isn't a UUID (e.g. an entitlement key)
+  optional string org_id = 7;          // always unset today — see this service's own doc
+  optional string before_state = 8;    // raw JSON text
+  optional string after_state = 9;     // raw JSON text
+  optional string reason = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message ListAuditLogRequest {
+  .org.sophie.common.PageRequest page = 1;
+}
+
+message ListAuditLogResponse {
+  repeated AuditLogEntry entries = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message GetAuditLogEntryRequest {
+  string id = 1;
+}
+
 service PlatformMetricsService {
   rpc GetSubscriptionMetrics (google.protobuf.Empty) returns (google.protobuf.Empty);
 }
