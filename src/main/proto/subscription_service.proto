@@ -153,6 +153,19 @@ message PlanPrice {
   string currency = 3;
   string amount_per_seat = 4;   // decimal string — never a float/double on the wire
   int32 min_seats = 5;
+  // Fields 6-9 are populated ONLY by PricingAdminService's staff responses — SubscriptionService's
+  // own customer-facing ListPlans never sets them (change_reason/created_by_user_id are internal
+  // admin notes, not customer-visible data). Reusing this message rather than a parallel staff-only
+  // one because every other field is identical and already real either way.
+  optional google.protobuf.Timestamp valid_from = 6;
+  optional google.protobuf.Timestamp valid_to = 7;
+  optional string change_reason = 8;
+  optional string created_by_user_id = 9;
+  // Real aggregate over subscriptions currently pinned to THIS price row (Subscription.plan_price_id)
+  // — meaningful even for a closed (valid_to set) row, since a grandfathered org can still be pinned
+  // to an old price. Staff-only, same reason as above.
+  optional int32 org_count = 10;
+  optional string mrr_contribution = 11; // decimal string, monthly-equivalent
 }
 
 message Subscription {
@@ -345,6 +358,105 @@ message ListSubscriptionsResponse {
 
 message GetSubscriptionForStaffRequest {
   string org_id = 1;
+}
+
+// PricingAdminService: the admin panel's Pricing screen — current prices (real PlanPrice rows,
+// enriched with the org-count/MRR-per-price aggregate no other RPC computes), scheduled price
+// changes (backed by price_change_notice, unmapped since V1 until now), and the mandatory preview
+// step the design doc's own open decision 7 calls out by name: "it cannot be assembled client-side
+// from the list endpoints" — PreviewPriceChange is a real server-side aggregation (group live
+// subscriptions by the price row they're pinned to, project MRR, split by renewal-date-vs-effective-
+// date), not a passthrough.
+//
+// Reads (ListPlanPrices/ListScheduledPriceChanges/PreviewPriceChange) follow the established staff-
+// tier read pattern: any ServicePrincipal or StaffPrincipal, no live platform_staff re-check (same
+// accepted gap as every other read-only admin surface this effort has built).
+//
+// SchedulePriceChange/CancelScheduledPriceChange are writes with real platform-wide consequence, so
+// they hold PlanAdminService's own stricter bar: StaffPrincipal ONLY, live-re-verified as an ACTIVE
+// PLATFORM_ADMIN against org-service's platform_staff table (see PlanAdminService's own doc for the
+// exact mechanism — reused unchanged here). Both also append a real admin_audit_log row.
+//
+// SchedulePriceChange deliberately does NOT touch the live, currently-serving PlanPrice row for the
+// plan/period being changed — doing so immediately would make TODAY's real customers pay the new
+// price before effective_at ever arrives (PlanChangeCalculator's own live-price lookup only checks
+// valid_to IS NULL, never valid_from), which this service must never risk. It inserts price_change_
+// notice (the record of INTENT) plus a new, deliberately-never-"current" PlanPrice row — created only
+// because price_change_notice.new_plan_price_id is NOT NULL and needs something real to point at —
+// with both valid_from and valid_to set to the same future effective_at instant, so
+// ux_plan_price_current's partial unique index never sees it as open-ended and it can never be
+// resolved by any live lookup. Actually flipping the live price over at effective_at (closing today's
+// row, re-opening this one) is a background job this pass does not build — same "translate the mock's
+// own actual behavior faithfully, don't invent new behavior it never had" reasoning: the mock's own
+// schedulePriceChange never touched a PlanPrice-equivalent either, only pushed a ScheduledPriceChange
+// row. Building that apply-at-effective-date job is future work, not a gap silently introduced here.
+service PricingAdminService {
+  rpc ListPlanPrices (google.protobuf.Empty) returns (ListPlanPricesResponse);
+  rpc ListScheduledPriceChanges (google.protobuf.Empty) returns (ListScheduledPriceChangesResponse);
+  rpc PreviewPriceChange (PreviewPriceChangeRequest) returns (PricePreview);
+  rpc SchedulePriceChange (SchedulePriceChangeRequest) returns (ScheduledPriceChange);
+  rpc CancelScheduledPriceChange (CancelScheduledPriceChangeRequest) returns (google.protobuf.Empty);
+}
+
+message ListPlanPricesResponse {
+  repeated PlanPrice prices = 1;
+}
+
+message ScheduledPriceChange {
+  string id = 1;
+  string plan_code = 2;
+  string billing_period = 3;
+  string old_amount = 4;
+  string new_amount = 5;
+  string currency = 6;
+  string direction = 7;              // INCREASE | DECREASE
+  google.protobuf.Timestamp effective_at = 8;
+  int32 notice_days = 9;
+  int32 affected_org_count = 10;
+  string status = 11;                // SCHEDULED | NOTIFIED | APPLIED | CANCELED
+  optional google.protobuf.Timestamp announced_at = 12;
+  optional google.protobuf.Timestamp applied_at = 13;
+  optional string created_by_user_id = 14;
+}
+
+message ListScheduledPriceChangesResponse {
+  repeated ScheduledPriceChange changes = 1;
+}
+
+message PreviewPriceChangeRequest {
+  string plan_code = 1;
+  string billing_period = 2;
+  string new_amount = 3;
+  google.protobuf.Timestamp effective_at = 4;
+}
+
+message PricePreview {
+  string plan_code = 1;
+  string billing_period = 2;
+  string old_amount = 3;
+  string new_amount = 4;
+  string currency = 5;
+  string direction = 6;               // INCREASE | DECREASE
+  int32 affected_org_count = 7;
+  int32 affected_seat_count = 8;
+  string mrr_before = 9;
+  string mrr_after = 10;
+  int32 orgs_renewing_before_count = 11; // current_period_end < effective_at
+  int32 orgs_renewing_after_count = 12;
+}
+
+message SchedulePriceChangeRequest {
+  string plan_code = 1;
+  string billing_period = 2;
+  string new_amount = 3;
+  google.protobuf.Timestamp effective_at = 4;
+  int32 notice_days = 5;
+  string reason = 6;
+}
+
+message CancelScheduledPriceChangeRequest {
+  string id = 1;
+  string reason = 2;
 }
 
 service PlatformMetricsService {
