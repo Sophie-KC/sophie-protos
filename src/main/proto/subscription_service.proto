@@ -166,6 +166,10 @@ message PlanPrice {
   // to an old price. Staff-only, same reason as above.
   optional int32 org_count = 10;
   optional string mrr_contribution = 11; // decimal string, monthly-equivalent
+  // Staff-only, same reason as above — the customer path never needs it, since a PlanPrice there is
+  // always already nested inside its own parent Plan.prices. PricingAdminService.ListPlanPrices
+  // returns a FLAT list with no such parent, so the row needs to carry its own plan code.
+  optional string plan_code = 12;
 }
 
 message Subscription {
