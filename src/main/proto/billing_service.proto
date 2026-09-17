@@ -168,6 +168,10 @@ message Invoice {
   // subscription.invoice_requested event — unset for period-close renewal invoices, which mint no
   // correlation id (nothing synchronous is waiting on them).
   optional string invoice_request_id = 20;
+  // Set once by InvoiceOverdueJob the first time this invoice's overdue reminder fires — never
+  // reset. Exposed for the admin panel's Metrics dunning funnel ("reminder sent" stage); the column
+  // existed on the entity since that job shipped but had no RPC/proto surface until now.
+  optional google.protobuf.Timestamp overdue_notified_at = 21;
 }
 
 message InvoiceLine {

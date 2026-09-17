@@ -349,6 +349,12 @@ message CreateEntitlementKeyRequest {
 service SubscriptionAdminService {
   rpc ListSubscriptions (ListSubscriptionsRequest) returns (ListSubscriptionsResponse);
   rpc GetSubscriptionForStaff (GetSubscriptionForStaffRequest) returns (Subscription);
+  // Real subscription_status_history rows, unmapped since the table's own migration until now — added
+  // for the admin panel's Metrics dunning funnel: PAYMENT_RECEIVED transitions are the real "recovered"
+  // signal, and a dated CANCELED transition gives a genuine "churned this month" figure (Subscription
+  // itself has no canceled_at on the wire). No per-row UI consumes this yet — Metrics fetches every page
+  // and counts client-side, same "fetch all, compute in TS" pattern as this service's other list RPCs.
+  rpc ListSubscriptionStatusHistory (ListSubscriptionStatusHistoryRequest) returns (ListSubscriptionStatusHistoryResponse);
 }
 
 message ListSubscriptionsRequest {
@@ -362,6 +368,25 @@ message ListSubscriptionsResponse {
 
 message GetSubscriptionForStaffRequest {
   string org_id = 1;
+}
+
+message SubscriptionStatusHistoryEntry {
+  string id = 1;
+  string subscription_id = 2;
+  optional string from_status = 3;
+  string to_status = 4;
+  string reason = 5;   // SIGNUP | BACKFILL | UPGRADE | DOWNGRADE | PAYMENT_RECEIVED | PAYMENT_FAILED |
+                       // DUNNING_ESCALATION | MANUAL | PERIOD_CLOSE | USER_CANCELED | USER_RESUMED
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ListSubscriptionStatusHistoryRequest {
+  .org.sophie.common.PageRequest page = 1;
+}
+
+message ListSubscriptionStatusHistoryResponse {
+  repeated SubscriptionStatusHistoryEntry entries = 1;
+  .org.sophie.common.PageResponse page = 2;
 }
 
 // PricingAdminService: the admin panel's Pricing screen — current prices (real PlanPrice rows,
