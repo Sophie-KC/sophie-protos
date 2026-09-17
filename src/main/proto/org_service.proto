@@ -150,6 +150,19 @@ service OrgService {
   // above is page-at-a-time and has no by-id fetch.
   rpc GetOrganizationForStaff(GetOrganizationForStaffRequest) returns (Organization);
 
+  // ── Users lookup (admin-panel-design-prompt.md's Users screen — "a lookup, not a directory") ──
+  // Staff-tier. No RPC anywhere resolved a user globally by email before this — every other lookup
+  // (BatchGetUsers, SearchOrgMembers) needs an id or an org already in hand. Throws NOT_FOUND for no
+  // match, same convention as GetOrganizationForStaff.
+  rpc LookupUserByEmailForStaff(LookupUserByEmailRequest) returns (UserProfile);
+
+  // Staff-tier twin of ListMyOrganizations above, reusing its exact request/response shape — the
+  // underlying query (role_assignments by user_id, scope_type='ORG') is already indexed and already
+  // self-service; this just swaps ListMyOrganizations' own self-only check for a staff gate. A
+  // dedicated RPC rather than relaxing ListMyOrganizations itself, since that one's self-only
+  // enforcement is a real security boundary for its actual (non-staff) callers.
+  rpc ListOrgMembershipsForStaff(ListMyOrganizationsRequest) returns (ListMyOrganizationsResponse);
+
   // ── Platform staff management (admin-panel-design-prompt.md's Staff screen) ─────────────────
   // Staff-tier, PLATFORM_ADMIN only (org-service enforces the role itself — never trust a
   // caller-supplied role). The caller's own identity comes from the gRPC principal
@@ -436,6 +449,20 @@ message GetOrganizationForStaffRequest {
   string org_id = 1;
 }
 
+message LookupUserByEmailRequest {
+  string email = 1;
+}
+
+message UserProfile {
+  string id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string avatar_version = 5; // empty = no avatar set, same convention as UserSummary
+  string status = 6;         // ACTIVE | DEACTIVATED
+  google.protobuf.Timestamp created_at = 7;
+}
+
 message PlatformStaffMember {
   string id = 1;
   string keycloak_user_id = 2;
@@ -483,6 +510,9 @@ message OrganizationMembership {
   // isn't one — this is the same check IsOrgAdmin uses). Replaces the frontend's old name-substring
   // heuristic (resolveCapabilities) for gating org-management UI.
   bool is_org_admin = 3;
+  // org_members.joined_at — added for the admin panel's Users lookup screen (ListOrgMembershipsForStaff
+  // above); ListMyOrganizations' own existing caller never needed it.
+  google.protobuf.Timestamp joined_at = 4;
 }
 
 message UpdateOrganizationRequest {
