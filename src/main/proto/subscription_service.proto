@@ -81,6 +81,11 @@ message EntitlementValue {
   int64 number_value = 2;
   bool bool_value = 3;
   EntitlementSource source = 4;
+  // Set only when source == OVERRIDE — real subscription_entitlement_override columns, added for
+  // the admin panel's Entitlements tab ("source answers 'why can they do that?'" — the resolved
+  // value+source alone doesn't say why or until when). Absent for PLAN/DEFAULT, which have neither.
+  optional string reason = 5;
+  optional google.protobuf.Timestamp expires_at = 6;
 }
 
 enum EntitlementSource {
