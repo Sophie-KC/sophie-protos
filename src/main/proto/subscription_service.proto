@@ -333,19 +333,27 @@ message CreateEntitlementKeyRequest {
   string reason = 7;
 }
 
-// SubscriptionAdminService: the admin panel's read-only Subscriptions screen (list + detail core
-// fields only — no writes yet; ChangePlan/CancelSubscription/entitlement-override RPCs stay
-// customer-facing-only for now). Callers are platform staff (a StaffPrincipal, resolved from the
-// isolated sophie-staff realm's JWT — see sophie-common-security's dual-verifier support and
-// org-service's StaffJwtVerifierConfig for the pattern subscription-service now mirrors) — every
-// RPC here rejects anyone who isn't a ServicePrincipal or StaffPrincipal explicitly in the handler,
-// the same shape as org-service's own ListOrganizations/GetOrganizationForStaff, since a USER-tier
-// PrincipalTierPolicy entry alone can't distinguish "staff" from "an ordinary customer."
+// SubscriptionAdminService: the admin panel's Subscriptions screen (list + detail core fields,
+// mostly read-only) plus, as of GetEntitlementsForStaff/SetEntitlementOverride/
+// RemoveEntitlementOverride, the Subscription Detail Entitlements tab. Callers are platform staff (a
+// StaffPrincipal, resolved from the isolated sophie-staff realm's JWT — see sophie-common-security's
+// dual-verifier support and org-service's StaffJwtVerifierConfig for the pattern subscription-service
+// now mirrors) — every RPC here rejects anyone who isn't a ServicePrincipal or StaffPrincipal
+// explicitly in the handler, the same shape as org-service's own ListOrganizations/
+// GetOrganizationForStaff, since a USER-tier PrincipalTierPolicy entry alone can't distinguish
+// "staff" from "an ordinary customer."
 //
-// Deliberately does NOT re-verify the caller against a live platform_staff row the way org-service's
-// own staff RPCs do (that table lives in org-service's DB, not this service's) — a deactivated staff
-// member's still-unexpired JWT could read subscription data until it naturally expires. Read-only,
-// low-severity, and a known, accepted gap for this pass; tracked, not silently glossed over.
+// Every RPC above SetEntitlementOverride below is a READ and deliberately does NOT re-verify the
+// caller against a live platform_staff row the way org-service's own staff RPCs do (that table lives
+// in org-service's DB, not this service's) — a deactivated staff member's still-unexpired JWT could
+// read subscription data until it naturally expires. Low-severity, accepted gap for reads, same as
+// every other read-only staff surface this admin-panel effort has built.
+//
+// SetEntitlementOverride/RemoveEntitlementOverride are real WRITES with real platform-wide
+// consequence and use the stricter tier instead: an ACTIVE PLATFORM_ADMIN, live-re-verified against
+// org-service's platform_staff table on every call (StaffAuthorization.requirePlatformAdmin(), the
+// same helper PlanAdminService/PricingAdminService's own writes already share) — never trusting the
+// JWT's own role claim. ChangePlan/CancelSubscription stay customer-facing-only for now.
 service SubscriptionAdminService {
   rpc ListSubscriptions (ListSubscriptionsRequest) returns (ListSubscriptionsResponse);
   rpc GetSubscriptionForStaff (GetSubscriptionForStaffRequest) returns (Subscription);
@@ -355,6 +363,39 @@ service SubscriptionAdminService {
   // itself has no canceled_at on the wire). No per-row UI consumes this yet — Metrics fetches every page
   // and counts client-side, same "fetch all, compute in TS" pattern as this service's other list RPCs.
   rpc ListSubscriptionStatusHistory (ListSubscriptionStatusHistoryRequest) returns (ListSubscriptionStatusHistoryResponse);
+
+  // Subscription Detail's Entitlements tab. Reuses EntitlementResolver.resolve(orgId) — the exact
+  // logic EntitlementService.GetEntitlements already calls — since that RPC itself is SERVICE-tier
+  // only (internal shared-secret callers, never a forwarded staff JWT; see EntitlementService's own
+  // doc) and has no staff-safe path to an arbitrary org's entitlements today.
+  rpc GetEntitlementsForStaff (GetEntitlementsForStaffRequest) returns (EntitlementMap);
+
+  // subscription_entitlement_override is a real table since V1__init_subscription.sql, already read
+  // by EntitlementResolver's own override-overlay step — but nothing anywhere ever called .save()/
+  // .delete() on it until these two RPCs. Both return the freshly re-resolved EntitlementMap so the
+  // caller sees the effective result (an override can be shadowed by nothing else, but a bad value
+  // or an already-expired expires_at should be visible immediately, not just trusted blind).
+  rpc SetEntitlementOverride (SetEntitlementOverrideRequest) returns (EntitlementMap);
+  rpc RemoveEntitlementOverride (RemoveEntitlementOverrideRequest) returns (EntitlementMap);
+}
+
+message GetEntitlementsForStaffRequest {
+  string org_id = 1;
+}
+
+message SetEntitlementOverrideRequest {
+  string org_id = 1;
+  string key = 2;
+  string value = 3;   // "-1" = unlimited, "true"/"false" for BOOLEAN, else the number as a string —
+                      // same wire convention as PlanEntitlementEdit.value/CreateEntitlementKeyRequest.default_value
+  optional google.protobuf.Timestamp expires_at = 4; // absent = permanent
+  string reason = 5;
+}
+
+message RemoveEntitlementOverrideRequest {
+  string org_id = 1;
+  string key = 2;
+  string reason = 3;
 }
 
 message ListSubscriptionsRequest {
