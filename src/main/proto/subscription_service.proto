@@ -447,6 +447,18 @@ message PricePreview {
   string mrr_after = 10;
   int32 orgs_renewing_before_count = 11; // current_period_end < effective_at
   int32 orgs_renewing_after_count = 12;
+  // The specific orgs counted in orgs_renewing_before_count — no org NAME here (subscription-service
+  // has none of its own to give; the admin-web frontend joins real org identity onto org_id client-
+  // side, the same established pattern Subscriptions/Invoices already use).
+  repeated PricePreviewOrgRow renewing_before = 13;
+}
+
+message PricePreviewOrgRow {
+  string org_id = 1;
+  int32 seats = 2;
+  string current_mrr = 3;
+  string new_mrr = 4;
+  google.protobuf.Timestamp renews_at = 5;
 }
 
 message SchedulePriceChangeRequest {
