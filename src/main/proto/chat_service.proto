@@ -77,6 +77,31 @@ service ChatService {
   // Channel topic/description. Caller (from identity context) must be OWNER or ADMIN of the channel.
   rpc UpdateChannelDescription(UpdateChannelDescriptionRequest) returns (Conversation);
   rpc UpdateChannelName(UpdateChannelNameRequest) returns (Conversation); // OWNER/ADMIN
+
+  // ===================== Per-user chat-list state (pin/mute/archive/unread) =====================
+  // All: caller must be a member of conversation_id, else PERMISSION_DENIED. All publish
+  // conversation.state_updated (the caller-scoped Conversation) to the CALLER's own user:{id}:events
+  // channel only, so the caller's other devices stay in sync — never to other conversation members.
+
+  // pinned=true: pinned_rank = max(existing pinned rank for this caller in this org) + 1. More than 10
+  // already-pinned conversations for the caller in that org → FAILED_PRECONDITION. pinned=false: clears
+  // the rank (NULL).
+  rpc SetConversationPinned(SetConversationPinnedRequest) returns (Conversation);
+  // conversation_ids must be exactly the caller's currently-pinned conversation ids in org_id (same set,
+  // any order) or INVALID_ARGUMENT. Assigns pinned_rank 0..n-1 in the given order.
+  rpc ReorderPinnedConversations(ReorderPinnedConversationsRequest) returns (google.protobuf.Empty);
+  // forever=true -> muted_until = 'infinity'. Else muted_until must be a future timestamp. Neither set
+  // -> unmute (muted_until cleared).
+  rpc MuteConversation(MuteConversationRequest) returns (Conversation);
+  // Sets or clears archived_at. Archiving does not clear pinned_rank — a pinned+archived conversation
+  // stays pinned inside the archive view.
+  rpc SetConversationArchived(SetConversationArchivedRequest) returns (Conversation);
+  // Sets marked_unread=true regardless of the real read pointer. Cleared by the next MarkAsRead.
+  rpc MarkConversationUnread(MarkConversationUnreadRequest) returns (google.protobuf.Empty);
+  // Redis-throttled (SET NX EX 4 per conversation+thread+user): publishes typing.started to every OTHER
+  // member only on the first call within a given 4s window, so a chatty client can safely call this
+  // every keystroke. No DB write, nothing persisted.
+  rpc SendTypingIndicator(SendTypingIndicatorRequest) returns (google.protobuf.Empty);
   // Pinned messages — any conversation member may pin/unpin (collaborative tier, like reactions).
   rpc PinMessage(PinMessageRequest) returns (google.protobuf.Empty);
   rpc UnpinMessage(UnpinMessageRequest) returns (google.protobuf.Empty);
@@ -172,6 +197,35 @@ message Conversation {
   // channel but is a stub elsewhere — not part of this feature's scope.
   int64 unread_count = 8;
   string avatar_version = 10; // CHANNEL only; empty for DIRECT (resolved client-side to the other member's user avatar)
+
+  // Chat-list sort/preview/caller state. Filled by ListMyConversations and GetConversation for the
+  // CALLER; every other RPC that returns a Conversation leaves 14-19 at their defaults (not-pinned,
+  // not-muted, not-archived, not-marked-unread, no read pointer) since they don't load the caller's
+  // membership row for this purpose.
+  google.protobuf.Timestamp last_activity_at = 11; // latest main-feed message's created_at, or the
+                                                    // conversation's own created_at if it has none yet
+  optional MessagePreview last_message = 12;       // absent for an empty conversation
+  int64 unread_mention_count = 13;                 // ListMyConversations only; same visibility rule as
+                                                    // unread_count (main feed, after the read pointer)
+  optional int32 pinned_rank = 14;                 // absent = not pinned; lower = higher in the pinned block
+  optional google.protobuf.Timestamp muted_until = 15; // absent = not muted; 'infinity' = muted forever
+  bool archived = 16;
+  bool marked_unread = 17;
+  optional string last_read_message_id = 18;
+  optional string last_read_cursor = 19;           // same opaque keyset codec as Message.cursor
+}
+
+// Deliberately not a full Message: no reactions, no attachments list, no seen-computation beyond the
+// one caller-relative bit below. Just enough for a chat-list row.
+message MessagePreview {
+  string id = 1;
+  string sender_id = 2;
+  string plain_text = 3;                  // server-flattened, <=140 chars — see PreviewTextExtractor
+  optional string first_attachment_name = 4;
+  int32 attachment_count = 5;
+  google.protobuf.Timestamp created_at = 6;
+  bool deleted = 7;
+  bool seen = 8;                          // meaningful only when sender_id == caller (✓ vs ✓✓)
 }
 
 message CreateGroupChannelRequest {
@@ -246,6 +300,10 @@ message Message {
   // message page both directions from it — e.g. click a mention/linked message, then ListMessages with
   // this cursor + direction=BACKWARD (older) and =FORWARD (newer). Clients never parse it.
   string cursor = 15;
+  // Echoes the client_message_id from the SendMessageRequest that created this message (whether this
+  // response came from the original insert or an idempotent replay). Absent for messages sent before
+  // this field existed, or without one supplied.
+  optional string client_message_id = 16;
 }
 
 message MessageReaction {
@@ -291,6 +349,11 @@ message SendMessageRequest {
   // during composition — lets the server revoke the now-superseded CHAT_MESSAGE_DRAFT reference once
   // the permanent MESSAGE reference is registered below. Absent when nothing was ever pasted in.
   optional string draft_id = 10;
+  // Client-generated UUID for send idempotency. A second SendMessage with the same (caller, id) —
+  // e.g. a retry after a timed-out response — returns the ALREADY-CREATED message unchanged and
+  // publishes nothing new, instead of creating a duplicate. Absent = no idempotency check (legacy
+  // callers / server-initiated sends, if any).
+  optional string client_message_id = 11;
 }
 
 message EditMessageRequest {
@@ -380,17 +443,71 @@ message MarkAsReadRequest {
   optional string last_read_message_id = 2;
 }
 
+// ===================== Per-user chat-list state =====================
+
+message SetConversationPinnedRequest {
+  string conversation_id = 1;
+  bool pinned = 2;
+}
+
+message ReorderPinnedConversationsRequest {
+  string org_id = 1;
+  repeated string conversation_ids = 2; // full ordered list of the caller's pinned conversations in org_id
+}
+
+message MuteConversationRequest {
+  string conversation_id = 1;
+  optional google.protobuf.Timestamp muted_until = 2;
+  bool forever = 3;
+}
+
+message SetConversationArchivedRequest {
+  string conversation_id = 1;
+  bool archived = 2;
+}
+
+message MarkConversationUnreadRequest {
+  string conversation_id = 1;
+}
+
+message SendTypingIndicatorRequest {
+  string conversation_id = 1;
+  optional string thread_root_message_id = 2;
+}
+
 // ===================== Realtime event envelope =====================
 // Not part of the RPC surface. JSON-serialized (via protobuf JsonFormat) and PUBLISHed to
 // `user:{userId}:events` for every affected conversation member — websocket-service relays it
 // opaquely (it doesn't parse this), the frontend is the only real consumer.
 
 message ChatEvent {
-  string type = 1; // message.created / message.edited / message.deleted / reaction.added / reaction.removed / read_state.updated
+  // message.created / message.edited / message.deleted / reaction.added / reaction.removed /
+  // read_state.updated / typing.started / conversation.state_updated / read_state.self_updated
+  string type = 1;
   string conversation_id = 2;
   optional Message message = 3;
   optional ReactionEvent reaction = 4;
   optional ReadStateEvent read_state = 5;
+  // typing.started only. Published to every OTHER conversation member (never the typist).
+  optional TypingEvent typing = 6;
+  // conversation.state_updated only. The full caller-scoped Conversation (fields 11-19 filled),
+  // published to the CALLER's own channel only, so their other devices sync pin/mute/archive/unread.
+  optional Conversation conversation = 7;
+  // read_state.self_updated only. Published to the CALLER's own channel only, so their other devices
+  // clear read badges without a refetch.
+  optional ReadStateSelfEvent read_state_self = 8;
+}
+
+message TypingEvent {
+  string user_id = 1;
+  optional string thread_root_message_id = 2; // absent = typing in the main feed
+}
+
+message ReadStateSelfEvent {
+  string conversation_id = 1;
+  optional string last_read_message_id = 2;
+  optional string last_read_cursor = 3;
+  google.protobuf.Timestamp last_read_at = 4;
 }
 
 message ReactionEvent {
@@ -422,6 +539,11 @@ message ThreadReplySourceReference {
   string conversation_id = 1;
   string thread_root_message_id = 2;
   string message_id = 3;
+}
+
+message DirectMessageSourceReference {
+  string conversation_id = 1;
+  string message_id = 2;
 }
 
 message ChatNotificationPayload {
