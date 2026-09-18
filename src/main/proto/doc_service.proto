@@ -126,6 +126,13 @@ service DocService {
   rpc SavePageAsTemplate(SavePageAsTemplateRequest) returns (PageTemplate);
   // Ordinary page-create access (same gate as CreatePage) — using a template is not a management action.
   rpc CreatePageFromTemplate(CreatePageFromTemplateRequest) returns (Page);
+
+  // ── Staff-tier (admin panel) ──────────────────────────────────────────────────────────────
+  // Any active staff member or trusted internal service may call this — no live platform_staff
+  // re-check, same accepted read-only trust level as every other staff-tier READ this admin-panel
+  // effort has built. A real Page->Space org join (Page has no org_id of its own); ACTIVE (not
+  // soft-deleted) pages in ACTIVE (not soft-deleted) spaces only.
+  rpc GetDocCountForStaff(GetDocCountForStaffRequest) returns (GetDocCountForStaffResponse);
 }
 
 message Space {
@@ -724,4 +731,12 @@ message CreatePageFromTemplateRequest {
   string title = 3;
   string template_id = 4;
   repeated TemplateVariableValue variable_values = 5;
+}
+
+message GetDocCountForStaffRequest {
+  string org_id = 1;
+}
+
+message GetDocCountForStaffResponse {
+  int64 count = 1;
 }

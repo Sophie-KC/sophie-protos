@@ -56,11 +56,36 @@ service FileService {
   // pattern; unimplemented (falls through to UNIMPLEMENTED) everywhere sophie.files.dev-reset-enabled
   // isn't explicitly true.
   rpc DevResetOrgStorage(DevResetOrgStorageRequest) returns (google.protobuf.Empty);
+
+  // ── Staff-tier (admin panel) ──────────────────────────────────────────────────────────────
+  // Any active staff member or trusted internal service may call this — no live platform_staff
+  // re-check, same accepted read-only trust level as every other staff-tier READ this admin-panel
+  // effort has built. storage_used_bytes is org_storage_usage.bytes_used, the same live-maintained
+  // running total that already drives storage.total.gb quota enforcement — not a fresh SUM. The
+  // 4-way breakdown attributes each file's FULL size to exactly one bucket (its EARLIEST-created
+  // file_references row, by entity_type) to avoid double-counting a file referenced from more than
+  // one owner at once; files_bytes is files with zero references at all (there is no real "generic
+  // file" entity_type — this is the closest honest analog). See GetOrgStorageStatsForStaffResponse's
+  // own field docs for the exact entity_type -> bucket mapping.
+  rpc GetOrgStorageStatsForStaff(GetOrgStorageStatsForStaffRequest) returns (GetOrgStorageStatsForStaffResponse);
 }
 
 // Dev/test-only — see DevResetOrgStorage above.
 message DevResetOrgStorageRequest {
   string org_id = 1;
+}
+
+message GetOrgStorageStatsForStaffRequest {
+  string org_id = 1;
+}
+
+message GetOrgStorageStatsForStaffResponse {
+  int64 file_count = 1;         // ACTIVE files only
+  int64 storage_used_bytes = 2; // org_storage_usage.bytes_used — the real quota-enforcement number
+  int64 docs_bytes = 3;         // primary reference in {DOC_PAGE_VERSION, DOC_PAGE_DRAFT, DOC_PAGE_SHELF}
+  int64 chat_bytes = 4;         // primary reference in {MESSAGE, CHAT_MESSAGE_DRAFT}
+  int64 files_bytes = 5;        // no file_references row at all (not yet attached to anything)
+  int64 other_bytes = 6;        // every other primary reference (task attachments, avatars, invoices, ...)
 }
 
 message File {

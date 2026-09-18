@@ -129,6 +129,13 @@ service TaskService {
   // Requires project.manage. Caller identity comes from the gRPC principal, never the body.
   rpc SetProjectAvatar(SetProjectAvatarRequest) returns (Project);
   rpc RemoveProjectAvatar(RemoveProjectAvatarRequest) returns (Project);
+
+  // ── Staff-tier (admin panel) ──────────────────────────────────────────────────────────────
+  // Any active staff member or trusted internal service may call this — no live platform_staff
+  // re-check, same accepted read-only trust level as every other staff-tier READ this admin-panel
+  // effort has built. "Open" = workflow_statuses.is_completion_status = false, joined through
+  // tasks -> workflow_statuses and tasks -> projects (Task has no org_id of its own; Project does).
+  rpc GetOpenTaskCountForStaff(GetOpenTaskCountForStaffRequest) returns (GetOpenTaskCountForStaffResponse);
 }
 
 // ===================== Messages =====================
@@ -850,4 +857,12 @@ message SetProjectAvatarRequest {
 
 message RemoveProjectAvatarRequest {
   string project_id = 1;
+}
+
+message GetOpenTaskCountForStaffRequest {
+  string org_id = 1;
+}
+
+message GetOpenTaskCountForStaffResponse {
+  int64 count = 1;
 }

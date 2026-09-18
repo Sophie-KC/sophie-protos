@@ -99,6 +99,15 @@ service ChatService {
   // OWNER/ADMIN or channel.manage. Caller identity comes from the gRPC principal, never the body.
   rpc SetConversationAvatar(SetConversationAvatarRequest) returns (Conversation);
   rpc RemoveConversationAvatar(RemoveConversationAvatarRequest) returns (Conversation);
+
+  // ── Staff-tier (admin panel) ──────────────────────────────────────────────────────────────
+  // Any active staff member or trusted internal service may call this — no live platform_staff
+  // re-check, same accepted read-only trust level as every other staff-tier READ this admin-panel
+  // effort has built. A live COUNT joined through messages -> conversations (Message has no org_id
+  // of its own; Conversation does) — accepted as a live-COUNT admin-panel read for now, same as
+  // every other staff count RPC added alongside this one; revisit with a maintained counter if
+  // this ever becomes a hot path (chat is this platform's highest-volume table).
+  rpc GetMessageCountForStaff(GetMessageCountForStaffRequest) returns (GetMessageCountForStaffResponse);
 }
 
 message UpdateChannelDescriptionRequest {
@@ -430,4 +439,12 @@ message SetConversationAvatarRequest {
 
 message RemoveConversationAvatarRequest {
   string conversation_id = 1;
+}
+
+message GetMessageCountForStaffRequest {
+  string org_id = 1;
+}
+
+message GetMessageCountForStaffResponse {
+  int64 count = 1;
 }
