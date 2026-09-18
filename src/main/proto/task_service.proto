@@ -22,6 +22,7 @@ service TaskService {
   rpc GetProject(GetProjectRequest) returns (Project);                       // requires project access
   rpc ListMyProjects(ListMyProjectsRequest) returns (ListMyProjectsResponse); // accessible projects in an org
   rpc DeleteProject(DeleteProjectRequest) returns (google.protobuf.Empty);   // soft-delete; creator or project admin
+  rpc UpdateProject(UpdateProjectRequest) returns (Project);                 // rename; creator or project admin
 
   // ── Task Types (org-wide catalog) ──
   rpc CreateTaskType(CreateTaskTypeRequest) returns (TaskType);              // org admin only
@@ -209,6 +210,13 @@ message DeleteProjectRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string project_id = 2;
+}
+
+message UpdateProjectRequest {
+  reserved 1; // was: requested_by (phase-2 identity field, deleted)
+  reserved "requested_by";
+  string project_id = 2;
+  optional string name = 3; // partial: absent = unchanged
 }
 
 // ── Task Types ──
