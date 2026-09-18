@@ -279,6 +279,13 @@ message Organization {
   string status = 4;
   google.protobuf.Timestamp created_at = 5;
   string avatar_version = 6;   // empty = no avatar set; frontend renders the monogram
+  // Staff-tier only — set by GetOrganizationForStaff, absent everywhere else (every other RPC
+  // returning this message reuses the same GrpcMappers.toProto, which never touches org_members).
+  // pending = a PENDING_ACTIVATION org_members row ("invited, not yet accepted"); deactivated = any
+  // org_members row (regardless of its own status) whose linked user ACCOUNT is DEACTIVATED —
+  // org_members itself has no deactivated status of its own.
+  optional int32 pending_member_count = 7;
+  optional int32 deactivated_member_count = 8;
 }
 
 message CreateOrgMemberRequest {
