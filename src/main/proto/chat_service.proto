@@ -59,6 +59,12 @@ service ChatService {
   // last). Keyset on (created_at, id); page.direction BACKWARD (default) reads older than the cursor,
   // FORWARD reads newer. Caller must be a conversation member.
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  // A single message by id, regardless of which page it'd fall on — used to jump to a message that
+  // isn't in an already-loaded page (e.g. a search hit or a deep link): the client pages backward and
+  // forward from the returned message's own `cursor` to load a window around it. Caller must be a
+  // member of the message's conversation. reactions is always empty here (same known limitation as
+  // EditMessage/DeleteMessage's returned Message — see MessageService#loadFullView).
+  rpc GetMessage(GetMessageRequest) returns (Message);
   // Replies to a given thread root, oldest first. Caller must be a member of the root message's
   // conversation.
   rpc ListThreadReplies(ListThreadRepliesRequest) returns (ListThreadRepliesResponse);
@@ -362,6 +368,10 @@ message EditMessageRequest {
 }
 
 message DeleteMessageRequest {
+  string message_id = 1;
+}
+
+message GetMessageRequest {
   string message_id = 1;
 }
 
