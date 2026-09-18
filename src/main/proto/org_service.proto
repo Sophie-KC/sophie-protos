@@ -150,6 +150,16 @@ service OrgService {
   // above is page-at-a-time and has no by-id fetch.
   rpc GetOrganizationForStaff(GetOrganizationForStaffRequest) returns (Organization);
 
+  // Staff-tier. Reuses UpdateOrganizationRequest's exact shape (name-only in practice — the admin
+  // panel's RenameOrgSheet never sends subdomain) and OrgUpdateService's own uniqueness/save logic
+  // via a new updateOrganizationForStaff entry point with no Org Admin gate — that gate lives in
+  // OrgUpdateService itself, not the handler, so this is a new service method, not just a new
+  // handler-level check. Any active staff role, not PLATFORM_ADMIN-only (same tier as every other
+  // read/write in this admin-panel effort except platform-staff management itself) — the finer
+  // PLATFORM_ADMIN/BILLING_STAFF split for this action is enforced client-side only today
+  // (shared/lib/permissions.ts), a pre-existing gap this RPC doesn't newly introduce.
+  rpc UpdateOrganizationForStaff(UpdateOrganizationRequest) returns (Organization);
+
   // ── Users lookup (admin-panel-design-prompt.md's Users screen — "a lookup, not a directory") ──
   // Staff-tier. No RPC anywhere resolved a user globally by email before this — every other lookup
   // (BatchGetUsers, SearchOrgMembers) needs an id or an org already in hand. Throws NOT_FOUND for no
