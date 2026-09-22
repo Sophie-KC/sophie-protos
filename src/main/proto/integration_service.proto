@@ -58,6 +58,19 @@ service IntegrationService {
   // registration stays entirely inside ConfirmGitLabGroupSelection's own flow). Add it when
   // calendar-service's webhook-driven sync (build order step 5) actually needs it.
   rpc GetAccessToken(GetAccessTokenRequest) returns (GetAccessTokenResponse);
+
+  // ── Provider profiles (vcs-integration-onprem-design.md §5) ──────────────────────────────────
+  // Which GitHub / GitLab *app* and *instance* an org connects through. PLATFORM = Sophie's own app
+  // on github.com / gitlab.com (the implicit default when no row exists — nothing changes for cloud
+  // orgs that never touch this); CUSTOM = the org's own app, possibly on a self-hosted GHES / GitLab.
+  // Org admin only. Secrets are write-only: GetProviderProfile reports presence, never values.
+  rpc GetProviderProfile(GetProviderProfileRequest) returns (ProviderProfile);
+  // Full replace of the org's profile for one provider. Omitted secret fields on an existing CUSTOM
+  // profile keep their stored values (so an admin can edit the base URL without re-pasting a PEM).
+  rpc UpsertProviderProfile(UpsertProviderProfileRequest) returns (ProviderProfile);
+  // Back to the platform default. Existing connections made through the custom profile are marked
+  // needs_reconnect rather than deleted.
+  rpc ClearProviderProfile(ClearProviderProfileRequest) returns (ProviderProfile);
 }
 
 message Connection {
@@ -129,4 +142,53 @@ message GetAccessTokenResponse {
   // on every call, rather than trusting a check done once at connect time — see
   // GoogleCalendarSyncService.pollConnection in calendar-service for why that trust was misplaced.
   string connected_by = 3;
+}
+
+// ── Provider profiles ────────────────────────────────────────────────────────────────────────────
+
+message GetProviderProfileRequest {
+  string org_id = 1;
+  string provider = 2; // GITHUB | GITLAB
+}
+
+message ProviderProfile {
+  string org_id = 1;
+  string provider = 2;
+  string mode = 3;              // PLATFORM | CUSTOM
+  string base_url = 4;          // https://github.com | https://ghe.example | https://gitlab.example
+  string api_base_url = 5;      // https://api.github.com | https://ghe.example/api/v3 | <gitlab>/api/v4
+  string webhook_delivery = 6;  // DIRECT | POLL | RELAY
+  // Read-only, derived from the deployment's public URL — what the admin must register on their app.
+  string callback_url = 7;
+  string webhook_url = 8;
+  // CUSTOM only — non-secret identifiers, plus presence flags for the secrets (never the values).
+  string github_app_id = 9;
+  string github_app_slug = 10;
+  bool github_private_key_set = 11;
+  bool github_webhook_secret_set = 12;
+  string gitlab_client_id = 13;
+  bool gitlab_client_secret_set = 14;
+  string updated_at = 15;       // RFC 3339; empty for the implicit platform default
+}
+
+message UpsertProviderProfileRequest {
+  string org_id = 1;
+  string provider = 2;
+  string mode = 3;              // PLATFORM (explicit pin) | CUSTOM
+  string base_url = 4;          // blank = provider's public instance
+  string api_base_url = 5;      // blank = derived from base_url
+  string webhook_delivery = 6;  // blank = DIRECT
+  // CUSTOM/GITHUB
+  string github_app_id = 7;
+  string github_app_slug = 8;
+  string github_private_key_pem = 9;   // write-only; blank keeps the stored value
+  string github_webhook_secret = 10;   // write-only; blank keeps the stored value
+  // CUSTOM/GITLAB
+  string gitlab_client_id = 11;
+  string gitlab_client_secret = 12;    // write-only; blank keeps the stored value
+}
+
+message ClearProviderProfileRequest {
+  string org_id = 1;
+  string provider = 2;
 }
