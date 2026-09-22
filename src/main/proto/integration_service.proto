@@ -82,6 +82,11 @@ service IntegrationService {
   // this deployment's webhook URL (GitHub: the App's latest hook delivery; GitLab: a test push on the
   // first registered project hook). Needs an existing connection. Org admin only.
   rpc TestWebhookDelivery(TestWebhookDeliveryRequest) returns (TestWebhookDeliveryResponse);
+
+  // Runs one polling pass for a connection right now (design §7) instead of waiting for the
+  // scheduler — for an admin who just switched to POLL delivery and wants to see it work. Org admin
+  // only; returns what the pass found.
+  rpc SyncConnectionNow(SyncConnectionNowRequest) returns (SyncConnectionNowResponse);
 }
 
 message Connection {
@@ -97,6 +102,11 @@ message Connection {
   // webhooks for this connection will silently stop until the org admin reconnects. Always false for
   // GitHub (installation tokens are minted fresh per call, nothing to "expire" at the connection level).
   bool needs_reconnect = 8;
+  // Polling reconciliation (vcs-integration-onprem-design.md §7): when this connection's repos were
+  // last listed for new commits / PRs / MRs, and the last error if that pass failed. Zero/empty
+  // when it has never been polled (a DIRECT-webhook connection is only polled by the safety net).
+  google.protobuf.Timestamp last_synced_at = 9;
+  string last_sync_error = 10;
 }
 
 message ListConnectionsRequest {
@@ -231,4 +241,18 @@ message TestWebhookDeliveryRequest {
 message TestWebhookDeliveryResponse {
   bool reachable = 1;
   string detail = 2;            // human-readable: the delivery's status, or why the test couldn't run
+}
+
+// ── Polling reconciliation ───────────────────────────────────────────────────────────────────────
+
+message SyncConnectionNowRequest {
+  string connection_id = 1;
+}
+
+message SyncConnectionNowResponse {
+  int32 repositories = 1;
+  int32 commits = 2;
+  int32 pull_requests = 3;      // PRs or MRs
+  string error = 4;             // empty on success
+  Connection connection = 5;    // with the updated last_synced_at
 }
