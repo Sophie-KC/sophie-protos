@@ -87,6 +87,15 @@ service IntegrationService {
   // scheduler — for an admin who just switched to POLL delivery and wants to see it work. Org admin
   // only; returns what the pass found.
   rpc SyncConnectionNow(SyncConnectionNowRequest) returns (SyncConnectionNowResponse);
+
+  // ── Hosted-connector instances (design §6, admin panel) — platform staff only ─────────────────
+  // Licensed on-prem instances allowed to use Sophie's GitHub App / GitLab application through this
+  // cloud (the hub). Reads: any verified platform staff. Register/Revoke: an ACTIVE PLATFORM_ADMIN,
+  // live-re-verified against org-service's platform_staff (never the JWT's role claim alone).
+  rpc ListHostedInstances(google.protobuf.Empty) returns (ListHostedInstancesResponse);
+  // The instance key is returned ONCE, here; only its hash is stored.
+  rpc RegisterHostedInstance(RegisterHostedInstanceRequest) returns (RegisterHostedInstanceResponse);
+  rpc RevokeHostedInstance(RevokeHostedInstanceRequest) returns (HostedInstance);
 }
 
 message Connection {
@@ -258,4 +267,33 @@ message SyncConnectionNowResponse {
   int32 pull_requests = 3;      // PRs or MRs
   string error = 4;             // empty on success
   Connection connection = 5;    // with the updated last_synced_at
+}
+
+// ── Hosted-connector instances ───────────────────────────────────────────────────────────────────
+
+message HostedInstance {
+  string id = 1;
+  string name = 2;
+  string public_url = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp revoked_at = 5;   // unset while active
+  int32 github_installations = 6;             // installations bound to this instance so far
+}
+
+message ListHostedInstancesResponse {
+  repeated HostedInstance instances = 1;
+}
+
+message RegisterHostedInstanceRequest {
+  string name = 1;
+  string public_url = 2;
+}
+
+message RegisterHostedInstanceResponse {
+  HostedInstance instance = 1;
+  string instance_key = 2;   // shown once; set INTEGRATIONS_HOSTED_SPOKE_INSTANCE_KEY on the instance
+}
+
+message RevokeHostedInstanceRequest {
+  string instance_id = 1;
 }
