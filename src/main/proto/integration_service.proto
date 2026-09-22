@@ -194,6 +194,9 @@ message ProviderProfile {
   // whether "use Sophie's app" is even offered (an on-prem install without our credentials has only
   // its own app to use).
   bool platform_app_available = 16;
+  // True on a hosted-connector SPOKE (design §6): "Sophie's app" here means through the Sophie KC
+  // cloud hub, and webhook_delivery may be RELAY (events pulled from the hub) as well as DIRECT.
+  bool hosted = 17;
 }
 
 message UpsertProviderProfileRequest {
