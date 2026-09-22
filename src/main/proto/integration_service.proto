@@ -71,6 +71,17 @@ service IntegrationService {
   // Back to the platform default. Existing connections made through the custom profile are marked
   // needs_reconnect rather than deleted.
   rpc ClearProviderProfile(ClearProviderProfileRequest) returns (ProviderProfile);
+
+  // Mode 2 for GitHub without PEM copy-pasting: the GitHub App Manifest flow (design §8). Returns the
+  // manifest the org admin's browser must form-POST to `target_url`; GitHub creates the app and
+  // redirects to /integrations/github/manifest/callback (HTTP) with a code this service converts into
+  // the app's id/slug/PEM/webhook secret, stored straight into the org's CUSTOM profile. Org admin only.
+  rpc StartGitHubAppManifest(StartGitHubAppManifestRequest) returns (StartGitHubAppManifestResponse);
+
+  // "Is my server reachable from the Git host?" — asks the provider to report its last delivery to
+  // this deployment's webhook URL (GitHub: the App's latest hook delivery; GitLab: a test push on the
+  // first registered project hook). Needs an existing connection. Org admin only.
+  rpc TestWebhookDelivery(TestWebhookDeliveryRequest) returns (TestWebhookDeliveryResponse);
 }
 
 message Connection {
@@ -169,6 +180,10 @@ message ProviderProfile {
   string gitlab_client_id = 13;
   bool gitlab_client_secret_set = 14;
   string updated_at = 15;       // RFC 3339; empty for the implicit platform default
+  // Whether Sophie's own app for this provider is configured on this deployment at all — decides
+  // whether "use Sophie's app" is even offered (an on-prem install without our credentials has only
+  // its own app to use).
+  bool platform_app_available = 16;
 }
 
 message UpsertProviderProfileRequest {
@@ -191,4 +206,29 @@ message UpsertProviderProfileRequest {
 message ClearProviderProfileRequest {
   string org_id = 1;
   string provider = 2;
+}
+
+// ── GitHub App Manifest flow ─────────────────────────────────────────────────────────────────────
+
+message StartGitHubAppManifestRequest {
+  string org_id = 1;
+  string base_url = 2;          // blank = https://github.com; a GitHub Enterprise Server otherwise
+  string github_owner = 3;      // blank = the admin's personal account; a GitHub org login to make it org-owned
+  string webhook_delivery = 4;  // DIRECT | POLL — stored on the resulting profile
+}
+
+message StartGitHubAppManifestResponse {
+  string target_url = 1;        // where to form-POST `manifest` (already carries ?state=)
+  string manifest_json = 2;
+  string state = 3;
+}
+
+message TestWebhookDeliveryRequest {
+  string org_id = 1;
+  string provider = 2;
+}
+
+message TestWebhookDeliveryResponse {
+  bool reachable = 1;
+  string detail = 2;            // human-readable: the delivery's status, or why the test couldn't run
 }
