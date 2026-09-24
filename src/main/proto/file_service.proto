@@ -29,6 +29,13 @@ service FileService {
   // Short-lived presigned GET URL for an ACTIVE file. Caller has already authorized the access.
   rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
 
+  // Server-side byte fetch for an ACTIVE file, for callers that must read the CONTENT rather than
+  // hand a URL to a browser — Doc Service extracting searchable text from an uploaded HTML page, and
+  // api-gateway serving that page's bytes from the isolated content origin (html-pages-design.md
+  // §5.1). Same trust model as every other RPC here: the caller has already authorized the access.
+  // Streamed in chunks for the same reason StreamAvatar is — no whole-file message on the wire.
+  rpc StreamFileContent(StreamFileContentRequest) returns (stream FileChunk);
+
   // Wholesale replace of every reference row for one (owner_type, owner_id): rows for file_ids not in
   // the given set are deleted, rows for file_ids not yet present are inserted. Idempotent — re-sending
   // the same set is a no-op. Empty file_ids revokes every reference this owner holds. Drives the
@@ -150,6 +157,19 @@ message GetDownloadUrlRequest {
 message GetDownloadUrlResponse {
   string download_url = 1;
   int32 expires_in_seconds = 2;
+}
+
+message StreamFileContentRequest {
+  string file_id = 1;
+  // Hard ceiling in bytes. The stream fails FAILED_PRECONDITION before sending anything if the
+  // file's recorded size exceeds it, so a caller that must buffer the whole body (both current
+  // callers do) can state its limit once instead of draining an oversized stream to discover it.
+  // 0 = no limit.
+  int64 max_size_bytes = 2;
+}
+
+message FileChunk {
+  bytes data = 1;
 }
 
 message ReplaceReferencesRequest {

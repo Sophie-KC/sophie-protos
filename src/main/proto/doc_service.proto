@@ -88,6 +88,24 @@ service DocService {
   rpc PublishPage(PublishPageRequest) returns (PageVersion);              // new version, consume draft, release lock
   rpc RestorePageVersion(RestorePageVersionRequest) returns (PageVersion); // new version from an old one's content
 
+  // ── Interactive HTML pages (html-pages-design.md) ──────────────────────────────────────────
+  // A page whose kind is PAGE_KIND_HTML stores its body as a file in File Service, not as
+  // ProseMirror JSON: one uploaded .html file per published version, never edited in place. These
+  // three RPCs are the whole surface — there is deliberately no "update HTML content" RPC, because
+  // every change is a new immutable version.
+  //
+  // Publish a new HTML version from an already-uploaded, ACTIVE file. Requires the same page access
+  // + write entitlement as PublishPage. expected_current_version_id, when set, makes this a
+  // compare-and-swap so a CI job regenerating docs cannot silently overwrite a human's upload.
+  rpc PublishHtmlVersion(PublishHtmlVersionRequest) returns (PageVersion);
+  // View-permission check for rendering one HTML version, returning just the ids the Gateway needs
+  // to mint its own short-lived render token. Deliberately returns no URL and no bytes: Doc Service
+  // only ever answers "may this caller see this version", and the Gateway owns the token secret.
+  rpc AuthorizeHtmlRender(AuthorizeHtmlRenderRequest) returns (AuthorizeHtmlRenderResponse);
+  // Presigned download of the ORIGINAL uploaded bytes (never the bootstrap-injected render form),
+  // Content-Disposition: attachment. View permission, same retention rules as GetPageVersion.
+  rpc GetHtmlSourceUrl(GetHtmlSourceUrlRequest) returns (GetAttachmentDownloadUrlResponse);
+
   // ── Page restrictions (narrowing override; managed under the space-access gate) ──
   rpc AddPageRestriction(AddPageRestrictionRequest) returns (google.protobuf.Empty);
   rpc RemovePageRestriction(RemovePageRestrictionRequest) returns (google.protobuf.Empty);
@@ -150,6 +168,15 @@ message Space {
   string avatar_version = 12;            // empty = no image avatar; frontend falls back to icon, then monogram
 }
 
+// What a page's body actually is. Fixed at creation and never converted — the two kinds have
+// different storage (ProseMirror JSON in a column vs. an uploaded file in File Service) and
+// different editors, and a conversion would be lossy in both directions.
+enum PageKind {
+  PAGE_KIND_UNSPECIFIED = 0; // wire-compat: an older client that never sets this means RICH_TEXT
+  PAGE_KIND_RICH_TEXT   = 1;
+  PAGE_KIND_HTML        = 2;
+}
+
 message Page {
   string id = 1;
   string space_id = 2;
@@ -164,6 +191,8 @@ message Page {
   // ListPagesInSpace so the tree can show a lock icon without an N+1 per-page check; other single-page
   // responses leave it false (not computed there).
   bool has_restrictions = 10;
+  // UNSPECIFIED is read as RICH_TEXT everywhere, so every pre-0.60.0 row and client keeps working.
+  PageKind kind = 11;
 }
 
 // ===================== Spaces =====================
@@ -231,7 +260,11 @@ message CreatePageRequest {
   reserved "requested_by";
   string space_id = 2;
   optional string parent_page_id = 3; // absent = top-level page
+  // Optional for kind=HTML: falls back to the uploaded document's own <title>. Required otherwise.
   string title = 4;
+  PageKind kind = 5;         // unset/UNSPECIFIED = RICH_TEXT
+  string html_file_id = 6;   // REQUIRED when kind = HTML — publishes version 1 in the same transaction
+  string version_note = 7;   // HTML only; ignored for RICH_TEXT
 }
 
 message GetPageRequest {
@@ -348,17 +381,25 @@ message PageContent {
   bool has_content = 2;                     // false = page has never been published (no version yet)
   optional string current_version_id = 3;
   int32 current_version_number = 4;         // 0 when has_content=false
-  string content = 5;                       // published JSON content; empty when has_content=false
+  // Published JSON content; empty when has_content=false — and ALWAYS empty for kind=HTML, whose
+  // body lives in File Service. A client must branch on `kind` before feeding this to an editor.
+  string content = 5;
   bool has_newer_draft = 6;                 // the caller has a draft newer than the current version
+  PageKind kind = 7;                        // mirrors Page.kind, so a content fetch alone is enough to branch
 }
 
 message PageVersion {
   string id = 1;
   string page_id = 2;
   int32 version_number = 3;
-  string content = 4;                       // full JSON content
+  string content = 4;                       // full JSON content; always empty for an HTML version
   string created_by = 5;
   google.protobuf.Timestamp created_at = 6;
+  // ── HTML versions only (all zero/empty for a rich-text version) ──
+  string html_file_id = 7;     // the File Service file holding this version's exact uploaded bytes
+  string html_sha256 = 8;      // hex SHA-256 of those bytes, computed by Doc Service at publish
+  int64  html_size_bytes = 9;
+  string version_note = 10;    // free-text note supplied at publish ("regenerated by CI", ...)
 }
 
 // Version list entry — metadata only, no content (fetch content via GetPageVersion).
@@ -368,6 +409,10 @@ message PageVersionMeta {
   int32 version_number = 3;
   string created_by = 4;
   google.protobuf.Timestamp created_at = 5;
+  // ── HTML versions only (all zero/empty for a rich-text version) ──
+  string html_sha256 = 6;
+  int64  html_size_bytes = 7;
+  string version_note = 8;
 }
 
 message PageDraft {
@@ -498,6 +543,37 @@ message RestorePageVersionRequest {
   reserved "requested_by";
   string page_id = 2;
   string version_id = 3;
+}
+
+// ===================== Interactive HTML pages =====================
+
+message PublishHtmlVersionRequest {
+  string page_id = 1;
+  // An ACTIVE File Service file in the caller's org, either uploaded by the caller or already
+  // referenced by one of this page's versions (which is what makes a restore-by-republish work).
+  string file_id = 2;
+  string version_note = 3;
+  // Optional compare-and-swap. Empty = no check. When set and it isn't the page's current version,
+  // the call fails FAILED_PRECONDITION and nothing is written.
+  string expected_current_version_id = 4;
+}
+
+message AuthorizeHtmlRenderRequest {
+  string page_id = 1;
+  string version_id = 2; // empty = the page's current version
+}
+
+message AuthorizeHtmlRenderResponse {
+  string org_id = 1;
+  string page_id = 2;
+  string version_id = 3;
+  string file_id = 4;
+  string sha256 = 5;
+}
+
+message GetHtmlSourceUrlRequest {
+  string page_id = 1;
+  string version_id = 2; // empty = the page's current version
 }
 
 // ===================== Restrictions =====================
