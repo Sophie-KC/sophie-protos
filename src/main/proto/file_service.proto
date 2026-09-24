@@ -166,6 +166,13 @@ message StreamFileContentRequest {
   // callers do) can state its limit once instead of draining an oversized stream to discover it.
   // 0 = no limit.
   int64 max_size_bytes = 2;
+  // REQUIRED. The org the caller believes this file belongs to; the stream fails PERMISSION_DENIED
+  // if the file's own org_id disagrees. This is the whole authorization story for this RPC: unlike
+  // every other file RPC it cannot fall back to checking a user's org membership, because its
+  // second caller — api-gateway's isolated content origin — has no user session at all, only a
+  // signed render token that names an org (html-pages-design.md §5.2). Binding the fetch to that
+  // org is what stops a tampered token from reaching another tenant's file.
+  string expected_org_id = 3;
 }
 
 message FileChunk {
