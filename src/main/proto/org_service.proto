@@ -286,6 +286,22 @@ message Organization {
   // org_members itself has no deactivated status of its own.
   optional int32 pending_member_count = 7;
   optional int32 deactivated_member_count = 8;
+  // active = an ACTIVE org_members row whose linked user account is NOT deactivated, so this and
+  // deactivated_member_count never count the same person twice. Set by GetOrganizationForStaff
+  // only, like the two above.
+  optional int32 active_member_count = 9;
+  // The same active members broken down by the org's OWN role names. Repeated rather than fixed
+  // owner/admin/member fields because this platform has no such taxonomy: roles are org-scoped rows
+  // (seeded "Org Admin"/"Member"/"Guest", plus whatever an org defines), so the set differs per org.
+  // A member holding more than one ORG-scoped role is counted under each, so these can sum to more
+  // than active_member_count — it is a breakdown by role, not a partition of members.
+  repeated RoleMemberCount role_member_counts = 10;
+}
+
+// One org role and how many of that org's active members currently hold it.
+message RoleMemberCount {
+  string role_name = 1;
+  int32 count = 2;
 }
 
 message CreateOrgMemberRequest {
