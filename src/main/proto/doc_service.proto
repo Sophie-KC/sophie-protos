@@ -591,10 +591,21 @@ message GetHtmlSourceUrlRequest {
 // ===================== Restrictions =====================
 
 message PageRestriction {
+  // The page the ROW lives on. For an inherited restriction this is the ancestor, not the page that
+  // was asked about — which is why inherited_from_page_title exists rather than leaving a client to
+  // work out whose restriction it is looking at.
   string page_id = 1;
   string subject_type = 2; // USER | ROLE
   string subject_id = 3;
   google.protobuf.Timestamp created_at = 4;
+
+  // Set when this restriction comes from an ANCESTOR rather than the page itself. Restrictions are
+  // cumulative: a page is visible only to someone who satisfies every restricted level above it, so a
+  // page with no rows of its own can still be locked. Without this, ListPageRestrictions would answer
+  // "no restrictions" for a page nobody outside a parent's list can open — telling the reader the
+  // opposite of the truth, and leaving "why can't my team see this?" unanswerable in the UI.
+  // Empty for a restriction the page carries itself.
+  optional string inherited_from_page_title = 5;
 }
 
 message AddPageRestrictionRequest {
@@ -620,6 +631,9 @@ message ListPageRestrictionsRequest {
 }
 
 message ListPageRestrictionsResponse {
+  // The page's own restrictions AND every ancestor's, nearest first. An entry carrying
+  // inherited_from_page_title came from an ancestor. Access requires satisfying EVERY restricted
+  // page represented here, not just one — see PageRestrictionResolver in doc-service.
   repeated PageRestriction restrictions = 1;
 }
 
