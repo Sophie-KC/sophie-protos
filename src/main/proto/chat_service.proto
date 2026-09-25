@@ -39,6 +39,20 @@ service ChatService {
   // membership, for the "what does this person actually have access to" admin view.
   rpc ListConversationsForUser(ListConversationsForUserRequest) returns (ListConversationsForUserResponse);
 
+  // ── Unified search support (unified-search-design.md §5.2) ──
+  // Every conversation id the caller is currently a member of, for search's ACL PRE-filter. Ids only.
+  // Conversations have no visibility column — there is no "public channel a non-member can read" —
+  // so membership IS the whole rule, exactly as ListMyConversations computes it. Unlike that RPC this
+  // one takes the caller from the verified principal rather than chat's legacy x-user-id header.
+  rpc ListAccessibleChannelIds(ListAccessibleChannelIdsRequest) returns (ListAccessibleChannelIdsResponse);
+
+  // Batched post-verification for search: given candidate message ids, the subset in conversations the
+  // caller is a member of. Mirrors Doc Service's FilterAccessiblePages.
+  rpc FilterAccessibleMessages(FilterAccessibleMessagesRequest) returns (FilterAccessibleMessagesResponse);
+
+  // Backfill: write search-outbox upsert rows for existing conversations and messages in batches (D8).
+  rpc RequestReindex(RequestReindexRequest) returns (RequestReindexResponse);
+
   // ===================== Messages, threads, reactions, mentions, read state =====================
 
   // Targets an existing conversation (conversation_id) or lazily starts/continues a DM
@@ -579,4 +593,31 @@ message GetMessageCountForStaffRequest {
 
 message GetMessageCountForStaffResponse {
   int64 count = 1;
+}
+
+// ── Unified search support ───────────────────────────────────────────────────────────────────────
+
+message ListAccessibleChannelIdsRequest {
+  string org_id = 1;
+}
+
+message ListAccessibleChannelIdsResponse {
+  repeated string channel_ids = 1;
+}
+
+message FilterAccessibleMessagesRequest {
+  repeated string message_ids = 1;
+}
+
+message FilterAccessibleMessagesResponse {
+  repeated string message_ids = 1; // subset of the input the caller can access
+}
+
+message RequestReindexRequest {
+  optional string org_id = 1; // absent = every org
+}
+
+message RequestReindexResponse {
+  string job_id = 1;
+  int64 queued = 2; // outbox rows written
 }

@@ -9,16 +9,152 @@ import "google/protobuf/timestamp.proto";
 import "common/pagination.proto";
 
 service SearchService {
-  // Full-text search over indexed chat messages, scoped to org_id, then filtered down to only the
-  // conversations requested_by is currently a member of (a live membership check, never cached here).
+  // ── Unified search (unified-search-design.md) ────────────────────────────────────────────────
+  // One query over pages, tasks, messages, attachment filenames and containers, ranked in one list
+  // from one Lucene index. Access is a PRE-filter in the query (accessible container ids + restricted-
+  // item principals), so paging and facet counts are exact, plus a post-verification of the returned
+  // page against each module's own FilterAccessible* RPC.
+  //
+  // IDENTITY: the caller comes from the verified principal, never a request field (design D5). The org
+  // likewise carries no field here — Search Service takes it from the gateway-established x-org-id call
+  // metadata and then PROVES the caller is an ACTIVE member of it (Org Service IsOrgMember) before
+  // running anything. Accepts ASSERTED_USER so a personal-API-token-authenticated request works.
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // Full reindex/backfill. Fans out RequestReindex to every producer, which writes outbox upserts in
+  // batches — reusing the existing pipeline rather than adding a second ingestion path (D8).
+  // Platform-admin only; the gateway is what enforces that.
+  rpc Reindex(ReindexRequest) returns (ReindexResponse);
+
+  // Per-type document counts, last indexed event time, reindex progress, DLQ depth. Platform-admin.
+  rpc GetIndexStatus(GetIndexStatusRequest) returns (IndexStatus);
+
+  // ── Per-type search (pre-existing contracts; now served from the unified index with a type filter,
+  //    per D10 — response shapes deliberately unchanged so clients keep working) ─────────────────
+  // Full-text search over indexed chat messages, scoped to the caller's proven org, then filtered down
+  // to only the conversations the caller is currently a member of.
   rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
 
-  // Full-text search over indexed doc pages, scoped to org_id (and space_id if given), then filtered to
-  // only pages requested_by can access (live per-page check via Doc Service's FilterAccessiblePages).
+  // Full-text search over indexed doc pages, scoped to the caller's proven org (and space_id if given),
+  // then filtered to only pages the caller can access (Doc Service's FilterAccessiblePages).
   rpc SearchPages(SearchPagesRequest) returns (SearchPagesResponse);
 }
 
+// What an indexed item is. One index, one entity, one scoring model (D1) — separate Lucene indexes
+// produce incomparable scores, because term statistics are per-index.
+enum SearchItemType {
+  SEARCH_ITEM_TYPE_UNSPECIFIED = 0;
+  PAGE = 1;
+  TASK = 2;
+  MESSAGE = 3;
+  ATTACHMENT = 4;  // filename only — attachment CONTENT search is explicitly out of scope
+  SPACE = 5;
+  PROJECT = 6;
+  CHANNEL = 7;     // chat-service calls these Conversations (type GROUP or DIRECT)
+}
+
+message SearchRequest {
+  string query = 1;                            // required; empty is a validation error, not "browse all"
+  repeated SearchItemType types = 2;           // empty = every type
+  repeated string container_ids = 3;           // facet filter: space / project / channel ids
+  repeated string author_ids = 4;
+  string updated_from = 5;                     // ISO-8601 instant, optional
+  string updated_to = 6;                       // ISO-8601 instant, optional
+  Sort sort = 7;
+  bool include_archived = 8;
+  bool include_facets = 9;
+  .org.sophie.common.PageRequest page = 10;    // shared contract; limit clamped to 50
+  // NO user_id / org_id. The caller is the verified principal; the org is proven via IsOrgMember.
+
+  enum Sort {
+    RELEVANCE = 0;
+    NEWEST = 1;
+  }
+}
+
+// A plain-text excerpt plus the ranges to emphasise. NEVER HTML (D6): message and page text is user
+// content, so a marked-up snippet would be stored XSS on every client that renders it. The client
+// builds its own text nodes from `text` + `ranges`.
+message Snippet {
+  string text = 1;
+  repeated Range ranges = 2;
+}
+
+message Range {
+  int32 start = 1;  // inclusive, UTF-16 code-unit offset into Snippet.text
+  int32 end = 2;    // exclusive
+}
+
+message SearchItemHit {
+  SearchItemType type = 1;
+  string source_id = 2;
+  string container_id = 3;
+  string title = 4;
+  Snippet title_highlight = 5;
+  Snippet snippet = 6;
+  string author_id = 7;
+  string author_name = 8;
+  string updated_at = 9;      // ISO-8601 instant
+  string display_json = 10;   // type-specific render data (status, space key, channel name, …)
+  double score = 11;
+}
+
+message Facet {
+  string key = 1;    // the raw id/value to filter by
+  string label = 2;  // resolved display name (container name, author name); key echoed when unresolved
+  int64 count = 3;
+}
+
+message SearchResponse {
+  repeated SearchItemHit hits = 1;
+  .org.sophie.common.PageResponse page = 2;
+  int64 total_estimate = 3;
+  bool exact_match = 4;   // the query was a task key and matched exactly one visible task
+  bool partial = 5;       // a producer was unreachable, so its container type was omitted (fail closed)
+  repeated Facet type_facets = 6;
+  repeated Facet container_facets = 7;
+  repeated Facet author_facets = 8;
+}
+
+message ReindexRequest {
+  optional string org_id = 1;             // absent = every org
+  repeated SearchItemType types = 2;      // empty = every type
+}
+
+message ReindexResponse {
+  string job_id = 1;
+  // Per-producer outcome, so a partially-failed fan-out is visible instead of looking like success.
+  repeated ReindexProducerResult results = 2;
+}
+
+message ReindexProducerResult {
+  string producer = 1;   // "doc-service" | "task-service" | "chat-service"
+  bool accepted = 2;
+  int64 queued = 3;      // outbox rows written, 0 when not accepted
+  string error = 4;      // set when accepted = false
+}
+
+message GetIndexStatusRequest {
+  optional string org_id = 1;  // absent = platform-wide
+}
+
+message IndexStatus {
+  repeated TypeCount counts = 1;
+  string last_indexed_at = 2;      // ISO-8601 instant of the most recent successful upsert, or empty
+  int64 dlq_depth = 3;             // total across the search-events DLQs
+  string running_job_id = 4;       // empty when no reindex is in flight
+  int64 running_job_queued = 5;
+}
+
+message TypeCount {
+  SearchItemType type = 1;
+  int64 count = 2;
+}
+
 message SearchMessagesRequest {
+  // Kept for contract compatibility (D10), but it is a REQUEST, not a grant: Search Service proves the
+  // verified caller is an ACTIVE member of it before querying, and falls back to the gateway's
+  // x-org-id metadata when it is empty.
   string org_id = 1;
   string query = 2;
   reserved 3; // was: requested_by (phase-2 identity field, deleted)
@@ -42,6 +178,7 @@ message SearchHit {
 }
 
 message SearchPagesRequest {
+  // Same as SearchMessagesRequest.org_id — membership-proven, never trusted on its own.
   string org_id = 1;
   string query = 2;
   reserved 3; // was: requested_by (phase-2 identity field, deleted)

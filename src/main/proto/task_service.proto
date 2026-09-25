@@ -105,6 +105,20 @@ service TaskService {
   rpc UnblockTask(UnblockTaskRequest) returns (google.protobuf.Empty);
 
   // ── Task ↔ Doc linking (delegates to Doc Service; validates task-side access first) ──
+  // ── Unified search support (unified-search-design.md §5.2) ──
+  // Every project id the caller can reach, for search's ACL PRE-filter. Ids only. Reuses
+  // ProjectGuard/ListMyProjects' existing access logic (a PROJECT-scope role assignment in Org
+  // Service) — search never writes its own access rules. Caller = the verified principal.
+  rpc ListAccessibleProjectIds(ListAccessibleProjectIdsRequest) returns (ListAccessibleProjectIdsResponse);
+
+  // Batched post-verification for search, mirroring Doc Service's FilterAccessiblePages: given
+  // candidate task ids, return the subset the caller can see. Tasks have no per-task restriction
+  // layer, so this is project access for each task's project, via ProjectGuard.hasAccess.
+  rpc FilterAccessibleTasks(FilterAccessibleTasksRequest) returns (FilterAccessibleTasksResponse);
+
+  // Backfill: write search-outbox upsert rows for existing projects and tasks in batches (D8).
+  rpc RequestReindex(RequestReindexRequest) returns (RequestReindexResponse);
+
   rpc LinkDoc(LinkDocRequest) returns (google.protobuf.Empty);
   rpc UnlinkDoc(UnlinkDocRequest) returns (google.protobuf.Empty);
   rpc ListLinkedDocs(ListLinkedDocsRequest) returns (ListLinkedDocsResponse);
@@ -873,4 +887,31 @@ message GetOpenTaskCountForStaffRequest {
 
 message GetOpenTaskCountForStaffResponse {
   int64 count = 1;
+}
+
+// ── Unified search support ───────────────────────────────────────────────────────────────────────
+
+message ListAccessibleProjectIdsRequest {
+  string org_id = 1;
+}
+
+message ListAccessibleProjectIdsResponse {
+  repeated string project_ids = 1;
+}
+
+message FilterAccessibleTasksRequest {
+  repeated string task_ids = 1;
+}
+
+message FilterAccessibleTasksResponse {
+  repeated string task_ids = 1; // subset of the input the caller can access
+}
+
+message RequestReindexRequest {
+  optional string org_id = 1; // absent = every org
+}
+
+message RequestReindexResponse {
+  string job_id = 1;
+  int64 queued = 2; // outbox rows written
 }

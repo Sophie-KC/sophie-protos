@@ -125,6 +125,18 @@ service DocService {
   // Batched access filter for search: given candidate page ids, return the subset the caller can actually
   // see (space access + page-level restrictions) — reuses PageAccessGuard.canAccess per id.
   rpc FilterAccessiblePages(FilterAccessiblePagesRequest) returns (FilterAccessiblePagesResponse);
+
+  // ── Unified search support (unified-search-design.md §5.2) ──
+  // Every space id the caller can reach, for search's ACL PRE-filter. Ids only: a large org may return
+  // thousands, which is fine for a Lucene terms filter and far cheaper than ListMySpaces' full objects.
+  // Reuses SpaceGuard/ListMySpaces' existing access logic — search never writes its own access rules.
+  // No user field: the caller is the verified principal, like every other RPC here.
+  rpc ListAccessibleSpaceIds(ListAccessibleSpaceIdsRequest) returns (ListAccessibleSpaceIdsResponse);
+
+  // Backfill: write search-outbox upsert rows for existing spaces, pages and attachments in batches,
+  // so content that predates indexing becomes searchable. Reuses the normal outbox → relay →
+  // search-events path rather than a second ingestion route (D8). Platform-admin, via search-service.
+  rpc RequestReindex(RequestReindexRequest) returns (RequestReindexResponse);
   // Reciprocal (task-centric) direction: pages linked to a task, filtered to those requested_by can access.
   rpc ListDocsLinkedToTask(ListDocsLinkedToTaskRequest) returns (ListDocsLinkedToTaskResponse);
 
@@ -700,6 +712,23 @@ message FilterAccessiblePagesRequest {
 
 message FilterAccessiblePagesResponse {
   repeated string page_ids = 1; // subset of the input the caller can access
+}
+
+message ListAccessibleSpaceIdsRequest {
+  string org_id = 1;
+}
+
+message ListAccessibleSpaceIdsResponse {
+  repeated string space_ids = 1;
+}
+
+message RequestReindexRequest {
+  optional string org_id = 1; // absent = every org
+}
+
+message RequestReindexResponse {
+  string job_id = 1;
+  int64 queued = 2; // outbox rows written
 }
 
 message ListDocsLinkedToTaskRequest {
