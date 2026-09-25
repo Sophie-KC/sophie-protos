@@ -103,6 +103,17 @@ service OrgService {
   rpc RevokeRoleAssignment(RevokeRoleAssignmentRequest) returns (google.protobuf.Empty);
   rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse);
 
+  // "Which roles do I hold in this org?" — the CALLER's own role ids, at every scope, from the
+  // verified principal. Distinct from ListRoleAssignments, which answers the same question about
+  // SOMEONE ELSE and is therefore Org-Admin-gated; this one can't leak anything the caller doesn't
+  // already have, so it needs no admin check.
+  //
+  // Added for unified search: a page can be restricted to a ROLE acting as a pseudo-group (see
+  // HasRoleAssignment and Doc Service's page_restrictions), so search's ACL pre-filter has to match
+  // indexed "r:<roleId>" principals against the roles the searcher actually holds. Enumerating them
+  // is the one thing HasRoleAssignment's one-at-a-time shape can't do.
+  rpc ListMyRoleIds(ListMyRoleIdsRequest) returns (ListMyRoleIdsResponse);
+
   // Permission catalog — global, not org-scoped; no Org-Admin check (read-only reference data).
   rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
 
@@ -658,6 +669,15 @@ message RevokeRoleAssignmentRequest {
   reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
   reserved "requested_by_user_id";
   string assignment_id = 2;
+}
+
+message ListMyRoleIdsRequest {
+  string org_id = 1;
+  // No user field: the caller is the verified principal, and this RPC only ever answers about them.
+}
+
+message ListMyRoleIdsResponse {
+  repeated string role_ids = 1;
 }
 
 message ListRoleAssignmentsRequest {
