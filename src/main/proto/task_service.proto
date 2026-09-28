@@ -500,6 +500,11 @@ message CreateTaskRequest {
   optional int32 story_points = 11;
   optional string due_date = 12;     // ISO yyyy-MM-dd
   optional string epic_id = 13;      // group under this epic
+  // Create straight into a sprint. Absent = the backlog, which is what every caller got before this
+  // field existed — so a task created from the board of an ACTIVE sprint landed in the backlog instead
+  // of the sprint the user was looking at. The client says which sprint it means rather than the server
+  // guessing, because the backlog view creates tasks too and must keep creating them unassigned.
+  optional string sprint_id = 14;
 }
 
 message GetTaskRequest {
