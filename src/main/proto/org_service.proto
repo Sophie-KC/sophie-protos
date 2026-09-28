@@ -124,6 +124,16 @@ service OrgService {
   // Project.created_by check). Resolved in constant query count, never a per-scope loop.
   rpc ListUserScopeAccess(ListUserScopeAccessRequest) returns (ListUserScopeAccessResponse);
 
+  // Which of these user ids are members of this org — the batch form of IsOrgMember, added for Task
+  // Service's PEOPLE custom fields (a value can carry up to 20 users and validating them one at a time
+  // would be a round trip each). One SQL query.
+  //
+  // AUTHORIZATION: this is a BATCH membership oracle, so unlike its one-at-a-time sibling it is worth
+  // gating properly. A SERVICE entry in OrgPrincipalTierPolicy would NOT gate it — see that class's
+  // javadoc on why a SERVICE requirement rejects nobody — so the handler enforces ServicePrincipal
+  // directly, the way HasPermission does.
+  rpc FilterOrgMembers(FilterOrgMembersRequest) returns (FilterOrgMembersResponse);
+
   // Permission catalog — global, not org-scoped; no Org-Admin check (read-only reference data).
   rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
 
@@ -708,6 +718,17 @@ message ListUserScopeAccessResponse {
   // One entry per REQUESTED scope id, including scopes the caller cannot reach (both flags false), so
   // the caller can tell "denied" from "not in the response".
   repeated ScopeAccess entries = 1;
+}
+
+message FilterOrgMembersRequest {
+  string org_id = 1;
+  repeated string user_ids = 2; // internal users.id, never a Keycloak sub
+}
+
+message FilterOrgMembersResponse {
+  // The subset of user_ids that are members. Order is not guaranteed; unknown/malformed ids are simply
+  // absent rather than an error, same as BatchGetUsers.
+  repeated string member_ids = 1;
 }
 
 message ListRoleAssignmentsRequest {

@@ -145,6 +145,34 @@ service TaskService {
   rpc SetProjectAvatar(SetProjectAvatarRequest) returns (Project);
   rpc RemoveProjectAvatar(RemoveProjectAvatarRequest) returns (Project);
 
+  // ── Custom fields (custom-fields-design.md) ───────────────────────────────────────────────
+  // Definitions are an ORG catalog (org admin), attached per project (project manage), with values set
+  // by anyone who can edit the task. Create/Restore/Attach are plan-gated; value writes and every read
+  // never are, so a downgraded org keeps full use of the fields it already has (design D7).
+  rpc CreateCustomField(CreateCustomFieldRequest) returns (CustomField);
+  rpc UpdateCustomField(UpdateCustomFieldRequest) returns (CustomField);
+  // Soft delete: hides the field everywhere, keeps every value. Reversible until PurgeCustomField.
+  rpc DeleteCustomField(DeleteCustomFieldRequest) returns (google.protobuf.Empty);
+  // Optional name lets the caller resolve a collision with a live field (design D3a).
+  rpc RestoreCustomField(RestoreCustomFieldRequest) returns (CustomField);
+  // Irreversible. Cascades to options, attachments and every stored value.
+  rpc PurgeCustomField(PurgeCustomFieldRequest) returns (google.protobuf.Empty);
+  rpc ListCustomFields(ListCustomFieldsRequest) returns (ListCustomFieldsResponse);
+
+  rpc CreateFieldOption(CreateFieldOptionRequest) returns (FieldOption);
+  rpc UpdateFieldOption(UpdateFieldOptionRequest) returns (FieldOption);
+  // Removes the option from every task by DB cascade, for both DROPDOWN and LABELS.
+  rpc DeleteFieldOption(DeleteFieldOptionRequest) returns (google.protobuf.Empty);
+  rpc ReorderFieldOptions(ReorderFieldOptionsRequest) returns (ListFieldOptionsResponse);
+
+  rpc AttachFieldToProject(AttachFieldToProjectRequest) returns (ProjectField);
+  rpc DetachFieldFromProject(DetachFieldFromProjectRequest) returns (google.protobuf.Empty);
+  rpc UpdateProjectField(UpdateProjectFieldRequest) returns (ProjectField);
+  rpc ListProjectFields(ListProjectFieldsRequest) returns (ListProjectFieldsResponse);
+
+  // Several fields in one transaction. A FieldValue with no value set CLEARS that field.
+  rpc SetTaskFieldValues(SetTaskFieldValuesRequest) returns (Task);
+
   // ── Staff-tier (admin panel) ──────────────────────────────────────────────────────────────
   // Any active staff member or trusted internal service may call this — no live platform_staff
   // re-check, same accepted read-only trust level as every other staff-tier READ this admin-panel
@@ -444,6 +472,9 @@ message Task {
   int64 rank = 19;                       // manual backlog order within the project (ascending)
   optional string sprint_id = 20;        // sprint this task belongs to; absent = backlog
   optional string epic_id = 21;          // epic (a task of the Epic type) this groups under; absent = none
+  // Custom-field values, only for fields that are live AND attached to this task's project. Batch-loaded
+  // per page by ListTasks — one query per value table, never one per task.
+  repeated FieldValue field_values = 22;
 }
 
 // Lightweight reference for dependency lists — enough to render a link, never full task detail.
@@ -941,4 +972,148 @@ message RequestReindexRequest {
 message RequestReindexResponse {
   string job_id = 1;
   int64 queued = 2; // outbox rows written
+}
+
+// ═══════════════════ Custom fields ═══════════════════
+// See claude/custom-fields-design.md. `type` and `config_json` are strings rather than proto enums,
+// matching Task.priority / Sprint.state and the VARCHAR(20) / JSONB columns behind them.
+
+message CustomField {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;
+  // TEXT URL NUMBER MONEY PROGRESS DATE CHECKBOX DROPDOWN LABELS PEOPLE. Never changes after creation.
+  string type = 4;
+  optional string description = 5;
+  // JSON object. NUMBER: {"decimals":0-4}. MONEY: {"currency":"UZS"} — currency is immutable.
+  string config_json = 6;
+  // DROPDOWN and LABELS only, ordered by position.
+  repeated FieldOption options = 7;
+  // Tasks carrying a value for this field. Populated by ListCustomFields so a delete confirmation can
+  // name the blast radius BEFORE deleting; zero elsewhere.
+  int64 usage_count = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  // Set = soft-deleted, restorable. Only returned when include_deleted was asked for.
+  optional google.protobuf.Timestamp deleted_at = 11;
+}
+
+message FieldOption {
+  string id = 1;
+  string field_id = 2;
+  string label = 3;
+  optional string color = 4;
+  int32 position = 5;
+  int64 usage_count = 6; // as CustomField.usage_count, per option
+}
+
+message ProjectField {
+  string project_id = 1;
+  string field_id = 2;
+  int32 position = 3;
+  bool show_on_card = 4;
+  CustomField field = 5; // the definition, so a client needs one call
+}
+
+// A repeated value inside a oneof needs a wrapper message.
+message OptionIdList { repeated string ids = 1; }
+message UserIdList { repeated string ids = 1; }
+
+// Used for BOTH reading (Task.field_values) and writing (SetTaskFieldValues). No value set = cleared.
+message FieldValue {
+  string field_id = 1;
+  oneof value {
+    string text = 2;            // TEXT, URL
+    string number = 3;          // NUMBER, MONEY, PROGRESS — decimal as a string, never a float
+    string date = 4;            // DATE, ISO yyyy-MM-dd
+    bool checked = 5;           // CHECKBOX — only ever true; absent means unchecked (design D9)
+    string option_id = 6;       // DROPDOWN
+    OptionIdList option_ids = 7; // LABELS
+    UserIdList user_ids = 8;    // PEOPLE — internal users.id, never a Keycloak sub
+  }
+}
+
+message CreateCustomFieldRequest {
+  string org_id = 1;
+  string name = 2;
+  string type = 3;
+  optional string description = 4;
+  string config_json = 5;
+  // DROPDOWN/LABELS may seed their options in the same call; position is the list order.
+  repeated FieldOptionInput options = 6;
+}
+
+message FieldOptionInput {
+  string label = 1;
+  optional string color = 2;
+}
+
+message UpdateCustomFieldRequest {
+  string field_id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  // NUMBER decimals only. MONEY currency and the type itself are immutable.
+  optional string config_json = 4;
+}
+
+message DeleteCustomFieldRequest { string field_id = 1; }
+message PurgeCustomFieldRequest { string field_id = 1; }
+
+message RestoreCustomFieldRequest {
+  string field_id = 1;
+  // Rename on the way back in, to resolve a collision with a live field.
+  optional string name = 2;
+}
+
+message ListCustomFieldsRequest {
+  string org_id = 1;
+  bool include_deleted = 2;
+}
+
+message ListCustomFieldsResponse { repeated CustomField fields = 1; }
+message ListFieldOptionsResponse { repeated FieldOption options = 1; }
+
+message CreateFieldOptionRequest {
+  string field_id = 1;
+  string label = 2;
+  optional string color = 3;
+}
+
+message UpdateFieldOptionRequest {
+  string option_id = 1;
+  optional string label = 2;
+  optional string color = 3;
+}
+
+message DeleteFieldOptionRequest { string option_id = 1; }
+
+message ReorderFieldOptionsRequest {
+  string field_id = 1;
+  repeated string ordered_option_ids = 2;
+}
+
+message AttachFieldToProjectRequest {
+  string project_id = 1;
+  string field_id = 2;
+  optional bool show_on_card = 3;
+}
+
+message DetachFieldFromProjectRequest {
+  string project_id = 1;
+  string field_id = 2;
+}
+
+message UpdateProjectFieldRequest {
+  string project_id = 1;
+  string field_id = 2;
+  optional int32 position = 3;
+  optional bool show_on_card = 4;
+}
+
+message ListProjectFieldsRequest { string project_id = 1; }
+message ListProjectFieldsResponse { repeated ProjectField fields = 1; }
+
+message SetTaskFieldValuesRequest {
+  string task_id = 1;
+  repeated FieldValue values = 2;
 }
