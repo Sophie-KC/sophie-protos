@@ -58,10 +58,10 @@ service TaskService {
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);        // one query for board + list
   rpc BatchGetTaskSummaries(BatchGetTaskSummariesRequest) returns (BatchGetTaskSummariesResponse); // cross-link enrichment
   rpc GetTaskByReference(GetTaskByReferenceRequest) returns (TaskSummary);                          // resolve KEY-NUMBER → task
-  // Trusted-internal tier, same as Org Service's IsOrgMember/BatchGetUsers: no requested_by, no access
-  // check. orgId disambiguates the key directly. Reachable only from other backend services —
-  // integration-service's webhook processing has no user in context to check access for.
-  rpc ResolveTaskReferenceInternal(ResolveTaskReferenceInternalRequest) returns (TaskSummary);
+  // REMOVED in 0.66.0: ResolveTaskReferenceInternal. Its only consumer, VCS webhook ingestion, moved
+  // INTO this service, so the reference resolver is now a plain in-process call
+  // (VcsReferenceUpsertService -> TaskService.resolveTaskReferenceInternal) and the RPC had no remote
+  // caller left — an unauthenticated-by-design entry point serving nobody. Do not reuse the name.
 
   // ── VCS references (commits/branches/PRs/MRs linked to a task) ──
   // Caller (the Gateway) is trusted to have already validated the user's access to the task itself —
@@ -499,10 +499,11 @@ message GetTaskByReferenceRequest {
   int32 task_number = 3;
 }
 
+// RESERVED in 0.66.0 — was ResolveTaskReferenceInternalRequest, for the RPC of the same name (see the
+// service block). Kept as a tombstone so the name is never silently reused for a different shape.
 message ResolveTaskReferenceInternalRequest {
-  string org_id = 1;
-  string project_key = 2;
-  int32 task_number = 3;
+  reserved 1, 2, 3;
+  reserved "org_id", "project_key", "task_number";
 }
 
 message VcsReference {
@@ -521,10 +522,14 @@ message VcsReference {
 
 message ListVcsReferencesForTaskRequest {
   string task_id = 1;
+  // Keyset on (occurred_at desc, id desc) — newest first. One row per commit, so this grows without
+  // bound on an active task.
+  .org.sophie.common.PageRequest page = 2;
 }
 
 message ListVcsReferencesForTaskResponse {
   repeated VcsReference references = 1;
+  .org.sophie.common.PageResponse page = 2;
 }
 
 message ProcessVcsWebhookEventRequest {
@@ -549,6 +554,13 @@ message TaskSummaryDetail {
   string status_name = 6;
 }
 
+// How ListTasks orders and keysets. Unspecified = NUMBER, so a 0.65.0 client is unchanged.
+enum TaskSort {
+  TASK_SORT_UNSPECIFIED = 0; // server default: NUMBER
+  TASK_SORT_NUMBER      = 1; // task_number asc — the stable, human-facing order
+  TASK_SORT_RANK        = 2; // rank asc, id asc — manual backlog order (see RankTask)
+}
+
 message ListTasksRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
@@ -562,6 +574,13 @@ message ListTasksRequest {
   .org.sophie.common.PageRequest page = 7;
   optional string parent_task_id = 8; // children of this task only
   optional string task_type_id = 9;   // tasks of this type only (e.g. the "Epic" type)
+  // Sprint/epic narrowing. The literal string "none" means IS NULL — i.e. sprint_id="none" is the
+  // backlog, epic_id="none" is work grouped under no epic. Absent = no filter on that dimension.
+  optional string sprint_id = 10;
+  optional string epic_id = 11;
+  // Sort + keyset dimension. A cursor is only valid for the sort it was issued under; mixing them is
+  // INVALID_ARGUMENT rather than a silently wrong page.
+  TaskSort sort = 12;
 }
 
 message ListTasksResponse {
@@ -647,10 +666,14 @@ message ListTaskCommentsRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string task_id = 2;
+  // Keyset on (created_at asc, id asc) over TOP-LEVEL comments only — a thread's replies always travel
+  // with their parent, so a page never splits a thread.
+  .org.sophie.common.PageRequest page = 3;
 }
 
 message ListTaskCommentsResponse {
   repeated TaskComment comments = 1;
+  .org.sophie.common.PageResponse page = 2;
 }
 
 // Task activity log — a structural/field change entry (status/assignee/title/etc.). Separate from comments.
@@ -667,10 +690,14 @@ message ListTaskActivityRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string task_id = 2;
+  // Keyset on (created_at desc, id desc) — newest first. Append-only, one row per field change, so an
+  // old task's history is unbounded.
+  .org.sophie.common.PageRequest page = 3;
 }
 
 message ListTaskActivityResponse {
   repeated TaskActivityEntry entries = 1;
+  .org.sophie.common.PageResponse page = 2;
 }
 
 // Manual backlog reorder: place task_id between previous_task_id and next_task_id (either may be absent

@@ -114,6 +114,16 @@ service OrgService {
   // is the one thing HasRoleAssignment's one-at-a-time shape can't do.
   rpc ListMyRoleIds(ListMyRoleIdsRequest) returns (ListMyRoleIdsResponse);
 
+  // Batched scope access for the CALLER over many scope ids at once — the fan-out fix for Task
+  // Service's ListMyProjects, which previously asked HasScopeAccess + IsScopeAdmin + HasPermission
+  // once per project (up to 3 round trips per row). Answers only about the verified principal, like
+  // ListMyRoleIds, so it needs no admin gate and can leak nothing the caller doesn't already hold.
+  //
+  // can_manage is scope-admin OR the named permission key; it deliberately does NOT include a
+  // resource "creator" notion, which lives in the owning service (Task Service ORs in its own
+  // Project.created_by check). Resolved in constant query count, never a per-scope loop.
+  rpc ListUserScopeAccess(ListUserScopeAccessRequest) returns (ListUserScopeAccessResponse);
+
   // Permission catalog — global, not org-scoped; no Org-Admin check (read-only reference data).
   rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
 
@@ -678,6 +688,26 @@ message ListMyRoleIdsRequest {
 
 message ListMyRoleIdsResponse {
   repeated string role_ids = 1;
+}
+
+message ListUserScopeAccessRequest {
+  string org_id = 1;
+  string scope_type = 2;          // e.g. PROJECT
+  repeated string scope_ids = 3;  // the scopes to resolve, in one call
+  // Permission key folded into can_manage, e.g. "project.manage". Empty = scope-admin only.
+  string manage_permission_key = 4;
+}
+
+message ScopeAccess {
+  string scope_id = 1;
+  bool has_access = 2;  // holds ANY role assignment at this scope
+  bool can_manage = 3;  // scope admin OR holds manage_permission_key at this scope
+}
+
+message ListUserScopeAccessResponse {
+  // One entry per REQUESTED scope id, including scopes the caller cannot reach (both flags false), so
+  // the caller can tell "denied" from "not in the response".
+  repeated ScopeAccess entries = 1;
 }
 
 message ListRoleAssignmentsRequest {
