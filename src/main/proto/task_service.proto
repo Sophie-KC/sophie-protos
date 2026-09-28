@@ -590,6 +590,57 @@ enum TaskSort {
   TASK_SORT_UNSPECIFIED = 0; // server default: NUMBER
   TASK_SORT_NUMBER      = 1; // task_number asc — the stable, human-facing order
   TASK_SORT_RANK        = 2; // rank asc, id asc — manual backlog order (see RankTask)
+  // Sort by a custom field's value; requires sort_field_id. Tasks with no value ALWAYS sort last,
+  // in either direction. Not allowed on LABELS or PEOPLE (multi-valued has no single sort key).
+  TASK_SORT_FIELD       = 3;
+}
+
+// Ascending unless stated. Applies to TASK_SORT_FIELD; NUMBER and RANK are always ascending.
+enum SortDirection {
+  SORT_DIRECTION_UNSPECIFIED = 0; // ASC
+  SORT_ASC                   = 1;
+  SORT_DESC                  = 2;
+}
+
+// How a field filter compares. Which ops are legal depends on the field's type — see
+// custom-fields-design.md §4.1. An op the type does not support is INVALID_ARGUMENT.
+enum FieldFilterOp {
+  FIELD_FILTER_OP_UNSPECIFIED = 0;
+  IS_SET       = 1;  // any type: a value exists
+  IS_EMPTY     = 2;  // any type: no value
+  EQUALS       = 3;  // TEXT, URL — exact
+  CONTAINS     = 4;  // TEXT, URL — case-insensitive substring
+  EQ           = 5;  // NUMBER, MONEY, PROGRESS
+  NE           = 6;  // has a value, and it differs (a task with NO value does not match)
+  LT           = 7;
+  LTE          = 8;
+  GT           = 9;
+  GTE          = 10;
+  BETWEEN      = 11; // NUMBER/MONEY/PROGRESS or DATE — inclusive, needs exactly 2 values
+  ON           = 12; // DATE
+  BEFORE       = 13; // DATE
+  AFTER        = 14; // DATE
+  ANY_OF       = 15; // DROPDOWN, LABELS, PEOPLE
+  ALL_OF       = 16; // LABELS, PEOPLE — every listed id present
+  NONE_OF      = 17; // DROPDOWN, LABELS, PEOPLE
+  CHECKED      = 18; // CHECKBOX
+  NOT_CHECKED  = 19; // CHECKBOX
+}
+
+// One custom-field condition on ListTasks. AND-combined with every other filter.
+//
+// Each of these becomes its own EXISTS / NOT EXISTS subquery server-side, never a join: joining a
+// multi-valued field would return the same task once per matching value, corrupting both the page size
+// and the keyset.
+message FieldFilter {
+  string field_id = 1;
+  FieldFilterOp op = 2;
+  // Operands, as strings in the field's own format: a decimal for NUMBER/MONEY/PROGRESS, ISO yyyy-MM-dd
+  // for DATE, a uuid for option/user ids. Empty for IS_SET/IS_EMPTY/CHECKED/NOT_CHECKED, exactly 2 for
+  // BETWEEN, one or more for ANY_OF/ALL_OF/NONE_OF.
+  //
+  // A PEOPLE filter accepts the literal "me", resolved server-side to the authenticated caller.
+  repeated string values = 3;
 }
 
 message ListTasksRequest {
@@ -612,6 +663,12 @@ message ListTasksRequest {
   // Sort + keyset dimension. A cursor is only valid for the sort it was issued under; mixing them is
   // INVALID_ARGUMENT rather than a silently wrong page.
   TaskSort sort = 12;
+  // Custom-field conditions, AND-combined with the filters above and with each other. At most 5.
+  repeated FieldFilter field_filters = 13;
+  // Required when sort = TASK_SORT_FIELD, ignored otherwise. A cursor is bound to this id as well as to
+  // the sort, so changing the field mid-paging is rejected rather than silently repaginating.
+  optional string sort_field_id = 14;
+  SortDirection sort_direction = 15;
 }
 
 message ListTasksResponse {
