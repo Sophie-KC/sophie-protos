@@ -100,6 +100,7 @@ service TaskService {
   rpc ReopenSprint(ReopenSprintRequest) returns (Sprint);            // COMPLETE → ACTIVE; no task moves
   rpc DeleteSprint(DeleteSprintRequest) returns (google.protobuf.Empty); // FUTURE only; tasks → backlog
   rpc MoveTaskToSprint(MoveTaskToSprintRequest) returns (Task);       // (re)assign one task; absent = backlog
+  rpc MoveTasksToSprint(MoveTasksToSprintRequest) returns (MoveTasksToSprintResponse); // the same, in bulk
   rpc DeleteTask(DeleteTaskRequest) returns (google.protobuf.Empty);  // soft-delete + cascade; reporter/admin
   rpc AddTaskLabel(AddTaskLabelRequest) returns (google.protobuf.Empty);
   rpc RemoveTaskLabel(RemoveTaskLabelRequest) returns (google.protobuf.Empty);
@@ -900,6 +901,20 @@ message ReopenSprintRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string sprint_id = 2;
+}
+
+// Move several tasks at once — the backlog's multi-select.
+//
+// One transaction and all-or-nothing on purpose: every task is validated before any is moved. A
+// half-applied bulk move is worse than a refusal, because the user cannot see which half succeeded
+// without re-reading a list they have just reordered in their head.
+message MoveTasksToSprintRequest {
+  repeated string task_ids = 1;
+  optional string sprint_id = 2; // absent = the backlog
+}
+
+message MoveTasksToSprintResponse {
+  repeated Task tasks = 1;
 }
 
 message MoveTaskToSprintRequest {
