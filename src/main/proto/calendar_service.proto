@@ -24,6 +24,9 @@ service CalendarService {
   // attendee-only read that omits the invited branch shows invitees nothing at all.
   rpc GetEvents           (GetEventsRequest)           returns (GetEventsResponse);
   rpc GetEventDetail      (GetEventDetailRequest)      returns (EventDetailView);
+  // A synced (external) event's own detail. Separate from GetEventDetail because an external event has
+  // none of the native model — no attendees, no RSVP, no series — and is read-only by definition.
+  rpc GetExternalEventDetail (GetExternalEventDetailRequest) returns (ExternalEventDetailView);
 
   // Cross-user read. Intervals only — never a title, regardless of caller's relationship to the event.
   rpc GetFreeBusy         (GetFreeBusyRequest)         returns (GetFreeBusyResponse);
@@ -134,6 +137,28 @@ message EventView {
   // 'internal' | 'google' — external rows are read-only, synced copies (see ExternalCalendarConnectionView);
   // the native model above is always source='internal'.
   string source = 22;
+}
+
+message GetExternalEventDetailRequest {
+  string event_id = 1;
+}
+
+// Everything `external_events` stores that is worth reading, which is more than the grid row carries.
+// Deliberately NOT folded into the grid response: a month's worth of Google descriptions would ride on
+// every range request to be read once, on click, for one event.
+message ExternalEventDetailView {
+  string event_id    = 1;
+  string title       = 2;
+  // Plain text as Google sends it, NOT the native model's rich-text JSON — it is someone else's
+  // content and is rendered as text, never as markup.
+  string description = 3;
+  string location    = 4;
+  // The event's page in the source calendar. Empty when the provider did not supply one.
+  string source_url  = 5;
+  string start_at    = 6;
+  string end_at      = 7;
+  bool   is_all_day  = 8;
+  string timezone    = 9;
 }
 
 message GetEventDetailRequest {
