@@ -140,7 +140,8 @@ message EventView {
 }
 
 message GetExternalEventDetailRequest {
-  string event_id = 1;
+  string org_id   = 1;
+  string event_id = 2;
 }
 
 // Everything `external_events` stores that is worth reading, which is more than the grid row carries.
