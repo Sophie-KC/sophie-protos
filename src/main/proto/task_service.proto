@@ -29,6 +29,8 @@ service TaskService {
   rpc ListTaskTypes(ListTaskTypesRequest) returns (ListTaskTypesResponse);   // any org member
   rpc UpdateTaskType(UpdateTaskTypeRequest) returns (TaskType);              // org admin only
   rpc DeleteTaskType(DeleteTaskTypeRequest) returns (google.protobuf.Empty); // org admin only
+  rpc SetTaskTypeIcon(SetTaskTypeIconRequest) returns (TaskType);            // org admin only
+  rpc RemoveTaskTypeIcon(RemoveTaskTypeIconRequest) returns (TaskType);      // org admin only
 
   // ── Workflow (per-project) ──
   rpc CreateWorkflowStatus(CreateWorkflowStatusRequest) returns (WorkflowStatus);          // project admin
@@ -212,6 +214,10 @@ message TaskType {
   // Live tasks carrying this type. Populated on list only, from one grouped query — it is what lets a
   // client state the cost of a delete before attempting one the server would refuse.
   int32 usage_count = 7;
+  // Set when the org uploaded its own mark for this type, in which case it wins over `icon`. The value
+  // is the avatar version (a content hash), so the URL changes whenever the image does and the old one
+  // stays cacheable forever. Served from the normal avatar path with owner_type TASK_TYPE.
+  optional string icon_version = 8;
 }
 
 message WorkflowStatus {
@@ -304,6 +310,18 @@ message DeleteTaskTypeRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string task_type_id = 2;
+}
+
+// An uploaded mark, from a file already uploaded through the normal file endpoint. The bytes are
+// re-encoded by File Service before they are ever served — see its AvatarImageProcessor, which is the
+// security boundary for every image the product accepts.
+message SetTaskTypeIconRequest {
+  string task_type_id = 1;
+  string source_file_id = 2;
+}
+
+message RemoveTaskTypeIconRequest {
+  string task_type_id = 1;
 }
 
 // ── Workflow ──
