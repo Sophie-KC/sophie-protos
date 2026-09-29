@@ -201,8 +201,17 @@ message TaskType {
   string id = 1;
   string org_id = 2;
   string name = 3;
-  optional string icon = 4; // absent = none
+  // An icon ID from the client's closed set (e.g. "diamond-outline"), NOT a glyph character. Storing
+  // the id lets the icon be redrawn as an SVG without a data migration, and keeps the value renderable
+  // in a client that has no font for whatever character an org picked. Absent = none.
+  optional string icon = 4;
   google.protobuf.Timestamp created_at = 5;
+  // A colour ramp KEY (e.g. "blue"), not a hex. The key maps to a different hex in light and dark
+  // themes, which a stored "#34618e" could never do. Absent = none.
+  optional string color = 6;
+  // Live tasks carrying this type. Populated on list only, from one grouped query — it is what lets a
+  // client state the cost of a delete before attempting one the server would refuse.
+  int32 usage_count = 7;
 }
 
 message WorkflowStatus {
@@ -268,7 +277,8 @@ message CreateTaskTypeRequest {
   reserved "requested_by";
   string org_id = 2;
   string name = 3;
-  string icon = 4; // optional
+  string icon = 4;  // optional, an icon id
+  string color = 5; // optional, a ramp key
 }
 
 message ListTaskTypesRequest {
@@ -285,8 +295,9 @@ message UpdateTaskTypeRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string task_type_id = 2;
-  optional string name = 3; // partial: absent = unchanged
-  optional string icon = 4; // partial: present-empty clears
+  optional string name = 3;  // partial: absent = unchanged
+  optional string icon = 4;  // partial: present-empty clears
+  optional string color = 5; // partial: present-empty clears
 }
 
 message DeleteTaskTypeRequest {
