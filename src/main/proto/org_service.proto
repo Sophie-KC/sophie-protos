@@ -239,6 +239,27 @@ service OrgService {
   // against CURRENT membership/permissions on every use, not whatever was true at issue time, so
   // revoking org access actually revokes programmatic access too.
   rpc ValidateApiToken(ValidateApiTokenRequest) returns (ValidateApiTokenResponse);
+
+  // Device sessions (desktop-implementation-design.md §12.2) — one row per signed-in client install
+  // (desktop, mobile, web). Same identity rule as the API-token RPCs: the owner is always
+  // SophieSecurityContext.currentInternalUserId() (the caller's forwarded, verified JWT), never a
+  // request field, and a device that isn't the caller's is indistinguishable from one that doesn't
+  // exist (NOT_FOUND).
+  //
+  // Registers the caller's device, or re-registers it in place when device_id names a live device the
+  // caller already owns (idempotent across sign-ins on the same install). Any other device_id —
+  // unknown, revoked, someone else's — is ignored and a fresh device is created with a server-minted id.
+  rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+  // The caller's own non-revoked devices, most recently seen first.
+  rpc ListMyDevices(ListMyDevicesRequest) returns (ListMyDevicesResponse);
+  // Marks the device revoked AND ends the Keycloak session recorded for it (offline or online) via
+  // the Keycloak Admin API, so that session's refresh token stops working. Returns UNAVAILABLE if
+  // Keycloak couldn't be told — the device stays revoked, and calling this again retries the session
+  // end (revoking an already-revoked device of the caller's is not an error, for exactly that reason).
+  rpc RevokeDevice(RevokeDeviceRequest) returns (google.protobuf.Empty);
+  // Bumps last_seen_at for a live device the caller owns — a no-op (still OK) for any other id.
+  // Called fire-and-forget by api-gateway when it mints a WebSocket ticket carrying a device id.
+  rpc TouchDevice(TouchDeviceRequest) returns (google.protobuf.Empty);
 }
 
 message ValidateSessionRequest {
@@ -1013,4 +1034,50 @@ message ValidateApiTokenResponse {
   repeated string scopes = 4;
   repeated string permissions = 5;
   MembershipStatus membership_status = 6;
+}
+
+message RegisterDeviceRequest {
+  // desktop-win32 | desktop-darwin | desktop-linux | android | ios | web
+  string platform = 1;
+  string device_name = 2;                   // <= 100 chars
+  optional string shell_version = 3;        // <= 40 chars
+  optional string os_version = 4;           // <= 40 chars
+  // The id a previous RegisterDevice returned to this install, if it has one.
+  optional string device_id = 5;
+  // The caller's access token `sid` claim — the Keycloak session RevokeDevice will end. Set by
+  // api-gateway from the JWT it has already validated, never from a client-supplied field.
+  optional string keycloak_session_id = 6;
+}
+
+message RegisterDeviceResponse {
+  string device_id = 1;
+}
+
+message ListMyDevicesRequest {
+  // The calling token's `sid` claim (api-gateway sets it from the validated JWT) — marks the matching
+  // device `current`. Unset = no device is marked current.
+  optional string current_session_id = 1;
+}
+
+message ListMyDevicesResponse {
+  repeated DeviceSummary devices = 1;
+}
+
+message DeviceSummary {
+  string id = 1;
+  string platform = 2;
+  string device_name = 3;
+  optional string shell_version = 4;
+  optional string os_version = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_seen_at = 7;
+  bool current = 8;
+}
+
+message RevokeDeviceRequest {
+  string device_id = 1;
+}
+
+message TouchDeviceRequest {
+  string device_id = 1;
 }
