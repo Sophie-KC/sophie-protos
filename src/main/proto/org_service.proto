@@ -260,6 +260,56 @@ service OrgService {
   // Bumps last_seen_at for a live device the caller owns — a no-op (still OK) for any other id.
   // Called fire-and-forget by api-gateway when it mints a WebSocket ticket carrying a device id.
   rpc TouchDevice(TouchDeviceRequest) returns (google.protobuf.Empty);
+
+  // ── Onboarding (claude/onboarding-verification.md; design onboarding-module-design.md) ─────────
+  // Identity is always the gRPC principal (SophieSecurityContext.currentInternalUserId()), never a
+  // request field. org_id is always checked against the caller's own ACTIVE-or-pending membership.
+  //
+  // The caller's whole onboarding picture in one read: org setup state, their own profile_done, the
+  // checklist ALREADY filtered by audience / permission / feature flag (the client renders it as-is),
+  // and their tour states. Guests get an empty checklist.
+  rpc GetOnboarding(GetOnboardingRequest) returns (Onboarding);
+  // Org Admin only. Moves the org-level wizard: step, team type, status. Allowed status transitions:
+  // PENDING -> COMPLETED | SKIPPED, SKIPPED -> PENDING | COMPLETED. COMPLETED is terminal
+  // (FAILED_PRECONDITION on any change away from it).
+  rpc UpdateOrgSetup(UpdateOrgSetupRequest) returns (OrgSetup);
+  // Org Admin only. Creates the starter structure (task types, project, channels, doc space) as the
+  // caller, whose JWT is forwarded to each downstream service. Idempotent: every created resource is
+  // recorded, and a same-named existing resource is adopted rather than duplicated, so calling it
+  // again after a partial failure finishes the rest. Never compensates. Structure only — no content.
+  rpc ApplySetupTemplate(ApplySetupTemplateRequest) returns (ApplySetupTemplateResult);
+  // Self only: profile_done, checklist_hidden.
+  rpc UpdateMemberOnboarding(UpdateMemberOnboardingRequest) returns (Onboarding);
+  // Self only. Client-sourced checklist keys only (team.invite via link copy, tours.any);
+  // INVALID_ARGUMENT for any key the server completes from events.
+  rpc CompleteOnboardingItem(CompleteOnboardingItemRequest) returns (Onboarding);
+  // Self only. Tour state is per USER, not per membership: knowing the UI does not reset per org.
+  rpc SetTourState(SetTourStateRequest) returns (TourState);
+  // Self only: the caller's own first/last name, in org-service and Keycloak. Identity is global
+  // across orgs, so no org is involved.
+  rpc UpdateMyProfile(UpdateMyProfileRequest) returns (UserProfile);
+
+  // ── Invite links ────────────────────────────────────────────────────────────────────────────────
+  // One active link per org, role Member, 7-day expiry, stored as a SHA-256 hash only.
+  // Org Admin or org.manage_members. NOT_FOUND when the org has no active, unexpired link.
+  rpc GetInviteLink(GetInviteLinkRequest) returns (InviteLink);
+  // Same gate. Revokes any active link in the same transaction and issues a new one. The raw token is
+  // returned here and never again.
+  rpc CreateInviteLink(CreateInviteLinkRequest) returns (InviteLinkWithToken);
+  rpc RevokeInviteLink(RevokeInviteLinkRequest) returns (google.protobuf.Empty);
+  // Public (SERVICE tier — the gateway calls it for a signed-out visitor). Unknown, revoked and
+  // expired tokens return the SAME shape (expired = true, no org): no existence oracle.
+  rpc PreviewInviteLink(PreviewInviteLinkRequest) returns (InviteLinkPreview);
+  // Authenticated. Joins the caller to the link's org as Member through the same seat enforcement
+  // CreateOrgMember uses (a link holds no seat). Already a member -> the existing membership, no error.
+  // Over the seat cap -> the standard entitlement denial (FAILED_PRECONDITION, QUOTA, seats.max).
+  // Invalid/expired/revoked -> NOT_FOUND.
+  rpc AcceptInviteLink(AcceptInviteLinkRequest) returns (OrganizationMembership);
+  // Public (SERVICE tier), for a visitor with no account: Keycloak self-registration is off, so the
+  // join page collects the account itself. Same Keycloak-user creation and compensation as SignUp,
+  // then the same membership path as AcceptInviteLink. ALREADY_EXISTS when the email already has an
+  // account (the visitor should sign in and accept instead); NOT_FOUND for an unusable link.
+  rpc SignUpWithInviteLink(SignUpWithInviteLinkRequest) returns (OrganizationMembership);
 }
 
 message ValidateSessionRequest {
@@ -1080,4 +1130,156 @@ message RevokeDeviceRequest {
 
 message TouchDeviceRequest {
   string device_id = 1;
+}
+
+// ── Onboarding ───────────────────────────────────────────────────────────────────────────────────
+
+message GetOnboardingRequest {
+  string org_id = 1;
+}
+
+message OrgSetup {
+  string status = 1;        // PENDING | COMPLETED | SKIPPED
+  int32 current_step = 2;   // 1-based wizard step to resume at
+  string team_type = 3;     // SOFTWARE | AGENCY | OTHER; empty = not chosen yet
+  google.protobuf.Timestamp completed_at = 4;
+}
+
+message ChecklistItem {
+  string key = 1;           // e.g. chat.first_message
+  bool done = 2;
+  google.protobuf.Timestamp completed_at = 3;  // absent when not done
+}
+
+message TourState {
+  string tour_key = 1;
+  string status = 2;        // COMPLETED | SKIPPED (NOT_SEEN tours are simply absent)
+  int32 version = 3;
+}
+
+message Onboarding {
+  OrgSetup org_setup = 1;
+  bool profile_done = 2;
+  // Already filtered for this caller: audience, permission, feature flag. Order is display order.
+  repeated ChecklistItem items = 3;
+  bool checklist_hidden = 4;
+  repeated TourState tours = 5;
+  bool is_org_admin = 6;
+  bool is_guest = 7;
+}
+
+message UpdateOrgSetupRequest {
+  string org_id = 1;
+  optional int32 step = 2;
+  optional string status = 3;
+  optional string team_type = 4;
+}
+
+message SetupTemplateInclude {
+  bool channels = 1;
+  bool project = 2;
+  bool doc_space = 3;
+}
+
+message ApplySetupTemplateRequest {
+  string org_id = 1;
+  string team_type = 2;     // SOFTWARE | AGENCY | OTHER
+  SetupTemplateInclude include = 3;
+  // uz | ru | en — the language resource names are created in. Language lives on the client (there
+  // is no server-side locale), so the caller sends it. Unknown/empty falls back to en.
+  string locale = 4;
+}
+
+message SetupResource {
+  string kind = 1;          // CHANNEL | PROJECT | TASK_TYPE | DOC_SPACE | WORKFLOW
+  string key = 2;           // template key, e.g. channel.general
+  string resource_id = 3;   // empty when failed
+  string name = 4;          // localized display name
+  string state = 5;         // CREATED | EXISTING | FAILED | SKIPPED
+  string error = 6;         // short reason when FAILED
+}
+
+message ApplySetupTemplateResult {
+  repeated SetupResource resources = 1;
+  bool complete = 2;        // every included resource is CREATED or EXISTING
+  // false when the org's plan lacks tasks.custom.workflows: the project keeps the default
+  // To Do / In Progress / Done instead of the template's own statuses.
+  bool custom_statuses_applied = 3;
+  string general_channel_id = 4;  // where "Go to workspace" lands; empty if no channel was created
+}
+
+message UpdateMemberOnboardingRequest {
+  string org_id = 1;
+  optional bool profile_done = 2;
+  optional bool checklist_hidden = 3;
+}
+
+message CompleteOnboardingItemRequest {
+  string org_id = 1;
+  string key = 2;
+}
+
+message SetTourStateRequest {
+  string tour_key = 1;
+  string status = 2;        // COMPLETED | SKIPPED
+  int32 version = 3;
+  // For the tours.any checklist item, which is per membership. Empty = don't touch the checklist.
+  string org_id = 4;
+}
+
+message UpdateMyProfileRequest {
+  string first_name = 1;
+  string last_name = 2;
+}
+
+// ── Invite links ─────────────────────────────────────────────────────────────────────────────────
+
+message InviteLink {
+  string id = 1;
+  string org_id = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  google.protobuf.Timestamp created_at = 4;
+  string created_by = 5;
+  int32 use_count = 6;
+}
+
+message InviteLinkWithToken {
+  InviteLink link = 1;
+  string token = 2;         // raw, base64url; shown once
+}
+
+message GetInviteLinkRequest {
+  string org_id = 1;
+}
+
+message CreateInviteLinkRequest {
+  string org_id = 1;
+}
+
+message RevokeInviteLinkRequest {
+  string org_id = 1;
+}
+
+message PreviewInviteLinkRequest {
+  string token = 1;
+}
+
+message InviteLinkPreview {
+  bool expired = 1;         // true for unknown, revoked and expired alike
+  string org_id = 2;        // empty when expired
+  string org_name = 3;
+  string org_avatar_version = 4;
+  string org_subdomain = 5;
+}
+
+message AcceptInviteLinkRequest {
+  string token = 1;
+}
+
+message SignUpWithInviteLinkRequest {
+  string token = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string password = 5;
 }

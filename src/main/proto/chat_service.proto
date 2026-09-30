@@ -45,6 +45,12 @@ service ChatService {
   // so membership IS the whole rule, exactly as ListMyConversations computes it. Unlike that RPC this
   // one takes the caller from the verified principal rather than chat's legacy x-user-id header.
   rpc ListAccessibleChannelIds(ListAccessibleChannelIdsRequest) returns (ListAccessibleChannelIdsResponse);
+  // Service-to-service only (the handler requires a ServicePrincipal). org-service calls it when a
+  // member joins an org that was set up from the onboarding starter template, so they land in the
+  // template's #general / #random — chat has no "public channel" concept, membership is the whole
+  // rule. Each conversation must be a CHANNEL in org_id; the user must be an org member. Idempotent:
+  // an existing membership is left alone. Unknown or foreign conversation ids are skipped, not errors.
+  rpc AddMemberToOrgChannels(AddMemberToOrgChannelsRequest) returns (google.protobuf.Empty);
 
   // Batched post-verification for search: given candidate message ids, the subset in conversations the
   // caller is a member of. Mirrors Doc Service's FilterAccessiblePages.
@@ -620,4 +626,12 @@ message RequestReindexRequest {
 message RequestReindexResponse {
   string job_id = 1;
   int64 queued = 2; // outbox rows written
+}
+
+// ── Onboarding support ───────────────────────────────────────────────────────────────────────────
+
+message AddMemberToOrgChannelsRequest {
+  string org_id = 1;
+  string user_id = 2;
+  repeated string conversation_ids = 3;
 }
