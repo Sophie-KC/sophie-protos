@@ -310,6 +310,18 @@ service OrgService {
   // then the same membership path as AcceptInviteLink. ALREADY_EXISTS when the email already has an
   // account (the visitor should sign in and accept instead); NOT_FOUND for an unusable link.
   rpc SignUpWithInviteLink(SignUpWithInviteLinkRequest) returns (OrganizationMembership);
+
+  // ── Org modules (claude/org-modules-design.md) ─────────────────────────────────────────────────
+  // Which of the switchable modules (chat, tasks, docs, calendar, apps) an org has turned on. A module
+  // with no stored row is ON, so every org that predates this has everything. Switching a module off
+  // hides and refuses it; it never deletes data.
+  //
+  // SERVICE tier: every module-owning service resolves this through sophie-entitlements' Modules
+  // client (near-cached, fails open). A user caller must be a member of the org.
+  rpc GetOrgModules(GetOrgModulesRequest) returns (OrgModules);
+  // Org Admin only. Applies only the keys present in `changes`. INVALID_ARGUMENT for an unknown key,
+  // or when the result would leave none of chat / tasks / docs on (MODULES_EMPTY in the description).
+  rpc UpdateOrgModules(UpdateOrgModulesRequest) returns (OrgModules);
 }
 
 message ValidateSessionRequest {
@@ -1282,4 +1294,23 @@ message SignUpWithInviteLinkRequest {
   string first_name = 3;
   string last_name = 4;
   string password = 5;
+}
+
+message GetOrgModulesRequest {
+  string org_id = 1;
+}
+
+message UpdateOrgModulesRequest {
+  string org_id = 1;
+  map<string, bool> changes = 2;  // module key -> enabled
+}
+
+message ModuleState {
+  string key = 1;      // chat | tasks | docs | calendar | apps
+  bool enabled = 2;
+}
+
+message OrgModules {
+  string org_id = 1;
+  repeated ModuleState modules = 2;  // every switchable module, in a fixed order
 }
