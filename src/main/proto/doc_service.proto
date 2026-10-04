@@ -459,6 +459,9 @@ message PageLocale {
   string created_by = 7;
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp updated_at = 9;
+  // Changes every time this language is (re-)added. A collab session belongs to one generation, so an
+  // editor still holding a deleted language's document can't sync it into the re-added one.
+  string collab_generation = 10;
 }
 
 message ListPageLocalesRequest {
@@ -517,6 +520,9 @@ message CheckPageAccessRequest {
   reserved "requested_by";
   string page_id = 2;
   string locale = 3;                        // "" = the original; else must be a live language version
+  // Translations: the generation the caller's document belongs to (PageLocale.collab_generation);
+  // a different live generation is FAILED_PRECONDITION. "" = don't check.
+  string collab_generation = 4;
 }
 
 // Was google.protobuf.Empty; wire-compatible (both decode from empty bytes), so a caller still on
@@ -524,6 +530,7 @@ message CheckPageAccessRequest {
 // or "EN"/"en" (or " "/"") would open separate rooms for one language version.
 message CheckPageAccessResponse {
   string locale = 1;                        // the request's locale, normalized ("" = the original)
+  string collab_generation = 2;             // the language's current generation ("" for the original)
 }
 
 message GetCollabStateRequest {
@@ -546,6 +553,7 @@ message SaveCollabStateRequest {
   string page_id = 2;
   bytes state = 3;
   string locale = 4;                        // "" = the original
+  string collab_generation = 5;             // as CheckPageAccessRequest's: a stale one is refused; "" = don't check
 }
 
 message GetPageContentRequest {
