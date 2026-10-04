@@ -582,6 +582,10 @@ message ChatNotificationPayload {
                                // document (mentions rendered as "@label", blocks newline-joined) and
                                // truncates AFTER flattening, so this never contains partial JSON.
                                // See MessageService.contentPreview()/plainText()/walkForText().
+  // Added for Telegram delivery (context line). Channel name for CHANNEL conversations, empty
+  // for DIRECT (the client shows "Direct message"). conversation_kind is the Conversation.type name.
+  string conversation_name = 3;
+  string conversation_kind = 4;
 }
 
 message SetConversationAvatarRequest {

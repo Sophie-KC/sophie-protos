@@ -182,6 +182,12 @@ service TaskService {
   // effort has built. "Open" = workflow_statuses.is_completion_status = false, joined through
   // tasks -> workflow_statuses and tasks -> projects (Task has no org_id of its own; Project does).
   rpc GetOpenTaskCountForStaff(GetOpenTaskCountForStaffRequest) returns (GetOpenTaskCountForStaffResponse);
+
+  // ── Telegram (/my) ────────────────────────────────────────────────────────────────────────
+  // The caller's open tasks (assignee = caller, status not a completion status) across every project
+  // in org_id they can still access, soonest due date first (no due date last), then newest. Caller =
+  // the verified principal (USER or a telegram-service ASSERTED_USER, see PRINCIPAL_TIERS.md).
+  rpc ListMyOpenTasks(ListMyOpenTasksRequest) returns (ListMyOpenTasksResponse);
 }
 
 // ===================== Messages =====================
@@ -1222,4 +1228,49 @@ message ListProjectFieldsResponse { repeated ProjectField fields = 1; }
 message SetTaskFieldValuesRequest {
   string task_id = 1;
   repeated FieldValue values = 2;
+}
+
+message ListMyOpenTasksRequest {
+  string org_id = 1;
+  int32 limit = 2;                            // default 10, max 50
+}
+
+message MyOpenTask {
+  string task_id = 1;
+  string project_id = 2;
+  string project_key = 3;
+  int32 task_number = 4;
+  string title = 5;
+  string status_name = 6;
+  string due_date = 7;                        // ISO yyyy-MM-dd, empty = none
+}
+
+message ListMyOpenTasksResponse {
+  repeated MyOpenTask tasks = 1;
+}
+
+// ===================== Notification Service integration =====================
+// JSON shapes Task Service builds when calling Notification Service's CreateNotification (JsonFormat,
+// camelCase), stored and returned opaquely. Types:
+//   task.assigned   — to the new assignee, when someone else sets it (create or update)
+//   task.mentioned  — to each user @mentioned in a new comment, or newly mentioned in a description
+//   task.commented  — to the assignee and the reporter on a new comment (never the author, never
+//                     someone already notified task.mentioned for the same comment)
+//   task.due_soon   — to the assignee, once, when an open task's due date is tomorrow (UTC)
+// None is sent to the actor themself.
+
+message TaskNotificationSourceReference {
+  string task_id = 1;
+  string project_id = 2;
+  string comment_id = 3;                      // task.mentioned / task.commented from a comment only
+}
+
+message TaskNotificationPayload {
+  string actor_id = 1;                        // empty for task.due_soon
+  string project_key = 2;
+  int32 task_number = 3;
+  string title = 4;                           // task title at the time
+  string project_name = 5;
+  string content_preview = 6;                 // comment text, plain, max 200 chars (comment types only)
+  string due_date = 7;                        // ISO yyyy-MM-dd (task.due_soon only)
 }

@@ -1,0 +1,195 @@
+syntax = "proto3";
+
+package com.platform.telegram.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.telegramservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Telegram Service (claude/telegram-integration-design.md): links a Telegram account to a Sophie KC
+// user, decides whether a notification also goes to Telegram, renders and sends it, and handles what
+// the user does in the bot (Show full, task buttons, replies, task drafts).
+//
+// Identity: every user-facing RPC acts on the caller's own internal users.id
+// (SophieSecurityContext.currentInternalUserId()), never a request field. Org settings RPCs are
+// additionally Org Admin only (org-service IsOrgAdmin). ShouldDeliver is SERVICE tier (notification-
+// service asks on a recipient's behalf).
+service TelegramService {
+  // Creates a single-use, 10-minute link code for the caller in org_id. ALREADY_EXISTS when the caller
+  // already has an ACTIVE link. FAILED_PRECONDITION when the bot is not configured on this install, or
+  // the org has Telegram switched off.
+  rpc CreateLinkCode(CreateLinkCodeRequest) returns (CreateLinkCodeResponse);
+  // The caller's link state plus whether the integration is available at all — the web settings page
+  // renders entirely from this one call.
+  rpc GetLinkStatus(GetLinkStatusRequest) returns (LinkStatus);
+  // Ends the caller's ACTIVE link (status UNLINKED). Idempotent: no active link is a silent no-op.
+  rpc Unlink(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+  // Per-type toggles (absent row = the type's default) plus only_when_away.
+  rpc GetTelegramPrefs(google.protobuf.Empty) returns (TelegramPrefs);
+  // Replaces only the toggles present in the request; types not listed keep their current value.
+  rpc UpdateTelegramPrefs(UpdateTelegramPrefsRequest) returns (TelegramPrefs);
+
+  // Per-scope switches: one conversation (CHAT, default OFF) or one calendar event (CALENDAR_EVENT,
+  // default ON). The effective value is returned whether or not a row exists.
+  rpc GetScopePref(GetScopePrefRequest) returns (ScopePref);
+  rpc SetScopePref(SetScopePrefRequest) returns (ScopePref);
+
+  // Org Admin only.
+  rpc GetOrgTelegramSettings(GetOrgTelegramSettingsRequest) returns (OrgTelegramSettings);
+  rpc UpdateOrgTelegramSettings(UpdateOrgTelegramSettingsRequest) returns (OrgTelegramSettings);
+
+  // SERVICE tier. True only when: the bot is configured, the org is enabled, the user has an ACTIVE
+  // link in this org, the type is enabled, and (when scope_type is set) the scope is enabled.
+  // Presence ("only when away") is NOT checked here — that happens at send time in this service.
+  rpc ShouldDeliver(ShouldDeliverRequest) returns (ShouldDeliverResponse);
+}
+
+message CreateLinkCodeRequest {
+  string org_id = 1;
+  // The caller's current web UI language ("en" | "ru" | "uz"); anything else is stored as "en".
+  // There is no server-side user locale, so the client sends it (same as ApplySetupTemplateRequest).
+  string locale = 2;
+}
+
+message CreateLinkCodeResponse {
+  string deep_link = 1;                       // https://t.me/<bot>?start=<code>
+  bytes qr_png = 2;                           // 256 px PNG of deep_link
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message GetLinkStatusRequest {
+  string org_id = 1;
+}
+
+message LinkStatus {
+  // False when this install has no bot (TELEGRAM_ENABLED=false or no token). Clients hide the section.
+  bool available = 1;
+  // False when the org admin switched Telegram off. Clients show a read-only notice.
+  bool org_enabled = 2;
+  bool linked = 3;                            // an ACTIVE link exists for the caller
+  string username = 4;                        // Telegram @username without "@", may be empty
+  google.protobuf.Timestamp linked_at = 5;
+  string bot_username = 6;
+  // The link's org when linked. A user has at most one ACTIVE link; it delivers only that org's
+  // notifications.
+  string linked_org_id = 7;
+}
+
+message TypePref {
+  string type = 1;                            // e.g. "chat.mention"
+  bool enabled = 2;
+  bool default_enabled = 3;
+}
+
+message TelegramPrefs {
+  bool only_when_away = 1;
+  repeated TypePref types = 2;                // every type Telegram supports, in display order
+}
+
+message UpdateTelegramPrefsRequest {
+  optional bool only_when_away = 1;
+  repeated TypePref types = 2;                // only type + enabled are read
+}
+
+enum ScopeType {
+  SCOPE_TYPE_UNSPECIFIED = 0;
+  CHAT = 1;                                   // scope_id = conversation id
+  CALENDAR_EVENT = 2;                         // scope_id = event id (the series, not one occurrence)
+}
+
+message GetScopePrefRequest {
+  ScopeType scope_type = 1;
+  string scope_id = 2;
+}
+
+message SetScopePrefRequest {
+  ScopeType scope_type = 1;
+  string scope_id = 2;
+  bool enabled = 3;
+}
+
+message ScopePref {
+  ScopeType scope_type = 1;
+  string scope_id = 2;
+  bool enabled = 3;                           // effective value
+  bool is_default = 4;                        // true = no row stored, `enabled` is the scope type's default
+}
+
+enum ContentMode {
+  CONTENT_MODE_UNSPECIFIED = 0;
+  PREVIEW_EXPANDABLE = 1;
+  PREVIEW_ONLY = 2;
+  METADATA_ONLY = 3;
+}
+
+message GetOrgTelegramSettingsRequest {
+  string org_id = 1;
+}
+
+message UpdateOrgTelegramSettingsRequest {
+  string org_id = 1;
+  optional bool enabled = 2;
+  optional ContentMode content_mode = 3;
+}
+
+message OrgTelegramSettings {
+  string org_id = 1;
+  bool enabled = 2;
+  ContentMode content_mode = 3;
+  int32 linked_user_count = 4;                // ACTIVE links in this org
+  bool available = 5;                         // false = no bot on this install
+}
+
+message ShouldDeliverRequest {
+  string user_id = 1;
+  string org_id = 2;
+  string type = 3;
+  ScopeType scope_type = 4;                   // UNSPECIFIED = no scope check (task types)
+  string scope_id = 5;
+}
+
+message ShouldDeliverResponse {
+  bool deliver = 1;
+}
+
+// ===================== RabbitMQ: telegram.deliver =====================
+// Not part of the RPC surface. notification-service publishes this as JSON (JsonFormat, camelCase)
+// to topic exchange "telegram-events", routing key "telegram.deliver", after ShouldDeliver said yes.
+// telegram-service consumes queue "telegram.deliver" (dead-letter: "telegram-events.dlx" →
+// "telegram.deliver.dlq").
+
+message TelegramDeliverEvent {
+  string notification_id = 1;
+  string user_id = 2;
+  string org_id = 3;
+  string type = 4;
+  TelegramActor actor = 5;                    // absent for system notifications (calendar reminders)
+  string context_name = 6;                    // "#backend", "Direct message", "SKC-142 Fix login", event title
+  TelegramTarget target = 7;
+  string preview_source = 8;                  // plain text; may be empty (then no preview, Open only)
+  string deep_link = 9;                       // app path, e.g. "/chat/<id>?msg=<id>"; host added by telegram-service
+  map<string, string> extra = 10;             // type-specific: startsAt, location, projectKey, taskNumber, ...
+}
+
+message TelegramActor {
+  string id = 1;
+  string name = 2;
+}
+
+message TelegramTarget {
+  string type = 1;                            // TASK | MESSAGE | PAGE | EVENT | CALL
+  string id = 2;
+}
+
+// ===================== Redis: user:{userId}:events =====================
+// Published by telegram-service whenever a link is created or ends, so an open settings page
+// switches state without a reload. websocket-service relays it like any other user event.
+message TelegramLinkChangedEvent {
+  string type = 1;                            // "telegram.link_changed"
+  string status = 2;                          // ACTIVE | UNLINKED | BLOCKED
+  string org_id = 3;
+  string username = 4;
+}
