@@ -80,7 +80,7 @@ service DocService {
   // websocket-service, which calls these two RPCs. ──
   // Content-free access probe (vs. reusing GetPageContent, which would transfer/discard content
   // just to check access) — used by api-gateway before minting a page-scoped collab WS ticket.
-  rpc CheckPageAccess(CheckPageAccessRequest) returns (google.protobuf.Empty);
+  rpc CheckPageAccess(CheckPageAccessRequest) returns (CheckPageAccessResponse);
   rpc GetCollabState(GetCollabStateRequest) returns (CollabState);   // has_state=false if never checkpointed
   rpc SaveCollabState(SaveCollabStateRequest) returns (google.protobuf.Empty);
 
@@ -517,6 +517,13 @@ message CheckPageAccessRequest {
   reserved "requested_by";
   string page_id = 2;
   string locale = 3;                        // "" = the original; else must be a live language version
+}
+
+// Was google.protobuf.Empty; wire-compatible (both decode from empty bytes), so a caller still on
+// the old contract keeps working. A collab ticket must carry THIS locale, not the request's raw one,
+// or "EN"/"en" (or " "/"") would open separate rooms for one language version.
+message CheckPageAccessResponse {
+  string locale = 1;                        // the request's locale, normalized ("" = the original)
 }
 
 message GetCollabStateRequest {
