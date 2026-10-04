@@ -642,6 +642,10 @@ message PublishPageRequest {
   string page_id = 2;
   string content = 3;
   string locale = 4;                        // "" = the original
+  // Translations: the generation the publishing editor's document belongs to (PageLocale.collab_generation).
+  // A stale one is FAILED_PRECONDITION, so a document opened before the language was removed and
+  // re-added can't be published into the new one. "" = don't check.
+  string collab_generation = 5;
 }
 
 message RestorePageVersionRequest {
