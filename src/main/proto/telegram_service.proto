@@ -24,8 +24,10 @@ service TelegramService {
   // The caller's link state plus whether the integration is available at all — the web settings page
   // renders entirely from this one call.
   rpc GetLinkStatus(GetLinkStatusRequest) returns (LinkStatus);
-  // Ends the caller's ACTIVE link (status UNLINKED). Idempotent: no active link is a silent no-op.
-  rpc Unlink(google.protobuf.Empty) returns (google.protobuf.Empty);
+  // Ends the caller's ACTIVE link in org_id (status UNLINKED). Idempotent: no active link is a silent
+  // no-op. A blank org_id ends every ACTIVE link the caller has (what a pre-0.83 caller sending Empty
+  // gets — same bytes on the wire).
+  rpc Unlink(UnlinkRequest) returns (google.protobuf.Empty);
 
   // Per-type toggles (absent row = the type's default) plus only_when_away.
   rpc GetTelegramPrefs(google.protobuf.Empty) returns (TelegramPrefs);
@@ -69,13 +71,19 @@ message LinkStatus {
   bool available = 1;
   // False when the org admin switched Telegram off. Clients show a read-only notice.
   bool org_enabled = 2;
-  bool linked = 3;                            // an ACTIVE link exists for the caller
+  bool linked = 3;                            // an ACTIVE link exists for the caller in this org
   string username = 4;                        // Telegram @username without "@", may be empty
   google.protobuf.Timestamp linked_at = 5;
   string bot_username = 6;
-  // The link's org when linked. A user has at most one ACTIVE link; it delivers only that org's
+  // The link's org when linked (= the requested org). Since 0.83 a user has one ACTIVE link per org,
+  // so every org they connect delivers; one Telegram account may hold links for several orgs, and each
+  // message then names its org.
   // notifications.
   string linked_org_id = 7;
+}
+
+message UnlinkRequest {
+  string org_id = 1;
 }
 
 message TypePref {
@@ -85,7 +93,7 @@ message TypePref {
 }
 
 message TelegramPrefs {
-  bool only_when_away = 1;
+  bool only_when_away = 1;                    // one choice per user, applied to all their links
   repeated TypePref types = 2;                // every type Telegram supports, in display order
 }
 
