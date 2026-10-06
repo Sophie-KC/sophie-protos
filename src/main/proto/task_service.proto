@@ -199,6 +199,10 @@ service TaskService {
   // ── Sprint reports (computed on read from sprint_scope_events) ──
   rpc GetSprintBurndown(GetSprintBurndownRequest) returns (SprintBurndown);                   // project member
   rpc ListSprintVelocity(ListSprintVelocityRequest) returns (ListSprintVelocityResponse);     // project member
+
+  // ── Archive (Trello-style: off every view, nothing deleted; restorable) ──
+  rpc SetTaskArchived(SetTaskArchivedRequest) returns (Task);                                  // project member
+  rpc ArchiveTasksInStatus(ArchiveTasksInStatusRequest) returns (ArchiveTasksInStatusResponse); // project member
 }
 
 // ===================== Messages =====================
@@ -543,6 +547,8 @@ message Task {
   // per page by ListTasks — one query per value table, never one per task.
   repeated FieldValue field_values = 22;
   optional string start_date = 23;       // ISO yyyy-MM-dd; absent = none. Never after due_date.
+  // Set = archived: off the board and every list (ListTasks excludes it unless asked), never deleted.
+  optional google.protobuf.Timestamp archived_at = 24;
 }
 
 // Lightweight reference for dependency lists — enough to render a link, never full task detail.
@@ -574,6 +580,9 @@ message CreateTaskRequest {
   // guessing, because the backlog view creates tasks too and must keep creating them unassigned.
   optional string sprint_id = 14;
   optional string start_date = 15;   // ISO yyyy-MM-dd
+  // Create straight into this column (a status of the project) — the board's inline "+ Add a card".
+  // Absent = the first status, as before. Creating is not a transition, so no transition check applies.
+  optional string status_id = 16;
 }
 
 message GetTaskRequest {
@@ -743,6 +752,14 @@ message ListTasksRequest {
   // the sort, so changing the field mid-paging is rejected rather than silently repaginating.
   optional string sort_field_id = 14;
   SortDirection sort_direction = 15;
+  // Default (unspecified) leaves archived tasks out, which is what every existing view expects.
+  ArchiveFilter archived = 16;
+}
+
+enum ArchiveFilter {
+  ARCHIVE_FILTER_EXCLUDE = 0; // live tasks only
+  ARCHIVE_FILTER_ONLY = 1;    // the Archived panel
+  ARCHIVE_FILTER_INCLUDE = 2; // everything
 }
 
 message ListTasksResponse {
@@ -1402,4 +1419,19 @@ message SprintVelocity {
 
 message ListSprintVelocityResponse {
   repeated SprintVelocity sprints = 1; // oldest → newest, for charting
+}
+
+// ── Archive ──
+
+message SetTaskArchivedRequest {
+  string task_id = 1;
+  bool archived = 2; // false restores. Sub-tasks follow their parent either way.
+}
+
+message ArchiveTasksInStatusRequest {
+  string status_id = 1; // "Archive all cards in this list"
+}
+
+message ArchiveTasksInStatusResponse {
+  int32 archived_count = 1;
 }
