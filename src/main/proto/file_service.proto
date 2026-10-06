@@ -28,6 +28,10 @@ service FileService {
   rpc AttachFileReference(AttachFileReferenceRequest) returns (google.protobuf.Empty);
   // Short-lived presigned GET URL for an ACTIVE file. Caller has already authorized the access.
   rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
+  // SERVICE tier only. Same URL as GetDownloadUrl, but authorized like StreamFileContent — by
+  // expected_org_id alone — for a caller with no org-member identity to forward: drive-service serving
+  // an anonymous visitor's public share link (drive-design.md §5). Always attachment, never inline.
+  rpc GetDownloadUrlForService(GetDownloadUrlForServiceRequest) returns (GetDownloadUrlResponse);
 
   // Server-side byte fetch for an ACTIVE file, for callers that must read the CONTENT rather than
   // hand a URL to a browser — Doc Service extracting searchable text from an uploaded HTML page, and
@@ -141,7 +145,7 @@ message GetFileRequest {
 
 message AttachFileReferenceRequest {
   string file_id = 1;
-  string entity_type = 2;   // MESSAGE | PAGE | APP_ICON | AVATAR_SOURCE
+  string entity_type = 2;   // MESSAGE | PAGE | APP_ICON | AVATAR_SOURCE | DRIVE_ITEM | ...
   string entity_id = 3;
 }
 
@@ -152,6 +156,18 @@ message GetDownloadUrlRequest {
   // callers must only set this for a content-type allowlist they've verified is safe to render
   // (e.g. doc-service's image embeds), never for a generic file attachment.
   bool inline = 2;
+  // Optional. Name for the attachment Content-Disposition instead of the file's stored file_name —
+  // dedup keeps the FIRST uploader's name, so a caller with its own name for the file (Drive) passes it
+  // here. Ignored when inline=true.
+  string download_file_name = 3;
+}
+
+message GetDownloadUrlForServiceRequest {
+  string file_id = 1;
+  // REQUIRED — the call fails PERMISSION_DENIED if the file's org_id disagrees (same binding as
+  // StreamFileContentRequest.expected_org_id).
+  string expected_org_id = 2;
+  string download_file_name = 3;      // optional, as on GetDownloadUrlRequest
 }
 
 message GetDownloadUrlResponse {
