@@ -322,7 +322,7 @@ message ItemAccess {
   repeated AccessGrant grants = 2;
   string general_access = 3;          // RESTRICTED | ORG
   string general_role = 4;            // VIEWER | EDITOR when ORG
-  string inherited_general_access = 5;   // the strongest ORG access inherited from an ancestor, if any
+  string inherited_general_access = 5;   // VIEWER | EDITOR: the strongest ORG general role inherited from an ancestor; empty = none
   ShareLink link = 6;                 // unset = no live link
   bool public_links_allowed = 7;      // org setting AND (shared drive) drive setting
   bool can_share = 8;
