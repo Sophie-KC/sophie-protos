@@ -1363,6 +1363,9 @@ message SetProjectFeatureRequest {
 
 message GetSprintBurndownRequest {
   string sprint_id = 1;
+  // IANA zone the days are cut in (e.g. "Asia/Tashkent"). Empty = UTC. Without it, work finished at
+  // 21:00 in Tashkent would count toward the next day.
+  string time_zone = 2;
 }
 
 message BurndownPoint {
