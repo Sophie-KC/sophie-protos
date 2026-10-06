@@ -259,6 +259,9 @@ message WorkflowStatus {
   // TODO | IN_PROGRESS | DONE. The source of truth for "is this work finished"; is_completion_status is
   // kept equal to (status_group == DONE) for older clients.
   string status_group = 7;
+  // A colour ramp KEY ("blue"), like TaskType.color — the board list's colour (Trello-style) and the
+  // status chip's everywhere. Absent = derived by the client from the status's place in the workflow.
+  optional string color = 8;
 }
 
 message WorkflowTransition {
@@ -373,6 +376,7 @@ message CreateWorkflowStatusRequest {
   bool is_completion_status = 5;
   // TODO | IN_PROGRESS | DONE. Empty = derived from is_completion_status (DONE, else IN_PROGRESS).
   string status_group = 6;
+  string color = 7; // optional ramp key; empty = none
 }
 
 message ListWorkflowStatusesRequest {
@@ -394,6 +398,7 @@ message UpdateWorkflowStatusRequest {
   optional bool is_completion_status = 5;
   // Wins over is_completion_status when both are sent.
   optional string status_group = 6;
+  optional string color = 7; // partial: present-empty clears
 }
 
 message DeleteWorkflowStatusRequest {
