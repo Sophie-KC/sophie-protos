@@ -223,6 +223,16 @@ message Project {
   // Recorded for analytics and display only — behaviour is driven by ListProjectFeatures, never by this.
   string template_key = 10;
   int32 template_version = 11;
+  // The team's default board-card fields, set by a project manager (claude/project-templates-design.md
+  // §15). Only meaningful when has_default_card_fields; otherwise clients use the platform default.
+  // Each viewer may still choose their own for this project.
+  repeated string default_card_fields = 12;
+  bool has_default_card_fields = 13;
+}
+
+// Wrapper so an update can say "set to this list" (even an empty one) apart from "leave unchanged".
+message CardFieldList {
+  repeated string fields = 1;
 }
 
 message TaskType {
@@ -315,6 +325,8 @@ message UpdateProjectRequest {
   reserved "requested_by";
   string project_id = 2;
   optional string name = 3; // partial: absent = unchanged
+  CardFieldList default_card_fields = 4; // present = set the team default (project manager)
+  bool clear_default_card_fields = 5;    // true = back to the platform default
 }
 
 // ── Task Types ──
