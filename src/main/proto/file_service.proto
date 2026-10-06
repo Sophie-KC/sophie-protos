@@ -32,6 +32,10 @@ service FileService {
   // expected_org_id alone — for a caller with no org-member identity to forward: drive-service serving
   // an anonymous visitor's public share link (drive-design.md §5). Always attachment, never inline.
   rpc GetDownloadUrlForService(GetDownloadUrlForServiceRequest) returns (GetDownloadUrlResponse);
+  // The org's live storage total (org_storage_usage.bytes_used — what storage.total.gb is enforced
+  // against). Caller must be an ORG MEMBER (forwarded identity), unlike the staff-tier breakdown below:
+  // Drive's storage meter and quota warnings show it to every member.
+  rpc GetOrgStorageUsage(GetOrgStorageUsageRequest) returns (GetOrgStorageUsageResponse);
 
   // Server-side byte fetch for an ACTIVE file, for callers that must read the CONTENT rather than
   // hand a URL to a browser — Doc Service extracting searchable text from an uploaded HTML page, and
@@ -168,6 +172,14 @@ message GetDownloadUrlForServiceRequest {
   // StreamFileContentRequest.expected_org_id).
   string expected_org_id = 2;
   string download_file_name = 3;      // optional, as on GetDownloadUrlRequest
+}
+
+message GetOrgStorageUsageRequest {
+  string org_id = 1;
+}
+
+message GetOrgStorageUsageResponse {
+  int64 used_bytes = 1;
 }
 
 message GetDownloadUrlResponse {
