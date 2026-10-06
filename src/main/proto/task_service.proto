@@ -188,6 +188,21 @@ service TaskService {
   // in org_id they can still access, soonest due date first (no due date last), then newest. Caller =
   // the verified principal (USER or a telegram-service ASSERTED_USER, see PRINCIPAL_TIERS.md).
   rpc ListMyOpenTasks(ListMyOpenTasksRequest) returns (ListMyOpenTasksResponse);
+
+  // ── Project templates + features (claude/project-templates-design.md) ──
+  // A template is a SEED, not a type: CreateProject.template_key writes statuses, transitions, task
+  // types and a feature set into an ordinary project. Behaviour afterwards follows the features only.
+  rpc ListProjectTemplates(ListProjectTemplatesRequest) returns (ListProjectTemplatesResponse); // any caller
+  rpc ListProjectFeatures(ListProjectFeaturesRequest) returns (ListProjectFeaturesResponse);    // project member
+  rpc SetProjectFeature(SetProjectFeatureRequest) returns (ListProjectFeaturesResponse);       // project manager
+
+  // ── Sprint reports (computed on read from sprint_scope_events) ──
+  rpc GetSprintBurndown(GetSprintBurndownRequest) returns (SprintBurndown);                   // project member
+  rpc ListSprintVelocity(ListSprintVelocityRequest) returns (ListSprintVelocityResponse);     // project member
+
+  // ── Archive (Trello-style: off every view, nothing deleted; restorable) ──
+  rpc SetTaskArchived(SetTaskArchivedRequest) returns (Task);                                  // project member
+  rpc ArchiveTasksInStatus(ArchiveTasksInStatusRequest) returns (ArchiveTasksInStatusResponse); // project member
 }
 
 // ===================== Messages =====================
@@ -204,6 +219,20 @@ message Project {
   // frontend show/hide management controls without guessing — see ProjectGuard.canManage.
   bool can_manage = 8;
   string avatar_version = 9; // empty = no avatar set; frontend renders the monogram
+  // The template this project was seeded from ("kanban" | "scrum" | "waterfall") and its version.
+  // Recorded for analytics and display only — behaviour is driven by ListProjectFeatures, never by this.
+  string template_key = 10;
+  int32 template_version = 11;
+  // The team's default board-card fields, set by a project manager (claude/project-templates-design.md
+  // §15). Only meaningful when has_default_card_fields; otherwise clients use the platform default.
+  // Each viewer may still choose their own for this project.
+  repeated string default_card_fields = 12;
+  bool has_default_card_fields = 13;
+}
+
+// Wrapper so an update can say "set to this list" (even an empty one) apart from "leave unchanged".
+message CardFieldList {
+  repeated string fields = 1;
 }
 
 message TaskType {
@@ -225,6 +254,9 @@ message TaskType {
   // is the avatar version (a content hash), so the URL changes whenever the image does and the old one
   // stays cacheable forever. Served from the normal avatar path with owner_type TASK_TYPE.
   optional string icon_version = 8;
+  // Stable identity for types a template needs ("epic", "story", "task", "bug", "subtask", "phase",
+  // "milestone"). Matched by key, never by name, so an org's rename survives. Absent = an org's own type.
+  optional string system_key = 9;
 }
 
 message WorkflowStatus {
@@ -234,6 +266,12 @@ message WorkflowStatus {
   int32 order_index = 4;
   bool is_completion_status = 5;
   google.protobuf.Timestamp created_at = 6;
+  // TODO | IN_PROGRESS | DONE. The source of truth for "is this work finished"; is_completion_status is
+  // kept equal to (status_group == DONE) for older clients.
+  string status_group = 7;
+  // A colour ramp KEY ("blue"), like TaskType.color — the board list's colour (Trello-style) and the
+  // status chip's everywhere. Absent = derived by the client from the status's place in the workflow.
+  optional string color = 8;
 }
 
 message WorkflowTransition {
@@ -252,6 +290,12 @@ message CreateProjectRequest {
   string key = 3;          // unique per org
   string name = 4;
   string description = 5;  // optional
+  // "kanban" | "scrum" | "waterfall". Empty = kanban (the behaviour every project had before templates).
+  string template_key = 6;
+  // Waterfall only: also create the five standard phases (Requirements … Deployment).
+  bool seed_phases = 7;
+  // uz | en | ru — the language the seeded statuses and phases are named in. Empty = en.
+  string locale = 8;
 }
 
 message GetProjectRequest {
@@ -281,6 +325,8 @@ message UpdateProjectRequest {
   reserved "requested_by";
   string project_id = 2;
   optional string name = 3; // partial: absent = unchanged
+  CardFieldList default_card_fields = 4; // present = set the team default (project manager)
+  bool clear_default_card_fields = 5;    // true = back to the platform default
 }
 
 // ── Task Types ──
@@ -340,6 +386,9 @@ message CreateWorkflowStatusRequest {
   string name = 3;
   int32 order_index = 4;
   bool is_completion_status = 5;
+  // TODO | IN_PROGRESS | DONE. Empty = derived from is_completion_status (DONE, else IN_PROGRESS).
+  string status_group = 6;
+  string color = 7; // optional ramp key; empty = none
 }
 
 message ListWorkflowStatusesRequest {
@@ -359,6 +408,9 @@ message UpdateWorkflowStatusRequest {
   optional string name = 3;
   optional int32 order_index = 4;
   optional bool is_completion_status = 5;
+  // Wins over is_completion_status when both are sent.
+  optional string status_group = 6;
+  optional string color = 7; // partial: present-empty clears
 }
 
 message DeleteWorkflowStatusRequest {
@@ -511,6 +563,9 @@ message Task {
   // Custom-field values, only for fields that are live AND attached to this task's project. Batch-loaded
   // per page by ListTasks — one query per value table, never one per task.
   repeated FieldValue field_values = 22;
+  optional string start_date = 23;       // ISO yyyy-MM-dd; absent = none. Never after due_date.
+  // Set = archived: off the board and every list (ListTasks excludes it unless asked), never deleted.
+  optional google.protobuf.Timestamp archived_at = 24;
 }
 
 // Lightweight reference for dependency lists — enough to render a link, never full task detail.
@@ -541,6 +596,10 @@ message CreateTaskRequest {
   // of the sprint the user was looking at. The client says which sprint it means rather than the server
   // guessing, because the backlog view creates tasks too and must keep creating them unassigned.
   optional string sprint_id = 14;
+  optional string start_date = 15;   // ISO yyyy-MM-dd
+  // Create straight into this column (a status of the project) — the board's inline "+ Add a card".
+  // Absent = the first status, as before. Creating is not a transition, so no transition check applies.
+  optional string status_id = 16;
 }
 
 message GetTaskRequest {
@@ -710,6 +769,14 @@ message ListTasksRequest {
   // the sort, so changing the field mid-paging is rejected rather than silently repaginating.
   optional string sort_field_id = 14;
   SortDirection sort_direction = 15;
+  // Default (unspecified) leaves archived tasks out, which is what every existing view expects.
+  ArchiveFilter archived = 16;
+}
+
+enum ArchiveFilter {
+  ARCHIVE_FILTER_EXCLUDE = 0; // live tasks only
+  ARCHIVE_FILTER_ONLY = 1;    // the Archived panel
+  ARCHIVE_FILTER_INCLUDE = 2; // everything
 }
 
 message ListTasksResponse {
@@ -728,6 +795,7 @@ message UpdateTaskRequest {
   optional string priority = 7;
   optional int32 story_points = 8;  // present clears when < 0 (see service)
   optional string due_date = 9;     // present-empty clears
+  optional string start_date = 10;  // present-empty clears
 }
 
 message ChangeTaskStatusRequest {
@@ -1273,4 +1341,114 @@ message TaskNotificationPayload {
   string project_name = 5;
   string content_preview = 6;                 // comment text, plain, max 200 chars (comment types only)
   string due_date = 7;                        // ISO yyyy-MM-dd (task.due_soon only)
+}
+
+// ── Project templates + features ──
+
+message ProjectTemplateStatus {
+  string key = 1;
+  map<string, string> name = 2;   // locale → name
+  string status_group = 3;        // TODO | IN_PROGRESS | DONE
+}
+
+message ProjectTemplate {
+  string key = 1;                 // kanban | scrum | waterfall
+  int32 version = 2;
+  map<string, string> name = 3;
+  map<string, string> description = 4;
+  map<string, string> best_for = 5;
+  repeated ProjectTemplateStatus statuses = 6;
+  repeated string task_types = 7; // system keys
+  repeated string features = 8;   // enabled feature names
+  string default_view = 9;        // BOARD | BACKLOG | TIMELINE
+  bool offers_seed_phases = 10;
+}
+
+message ListProjectTemplatesRequest {}
+
+message ListProjectTemplatesResponse {
+  repeated ProjectTemplate templates = 1;
+}
+
+// One switch. Absent from a list = off. Config is a JSON object (feature-specific, e.g.
+// SPRINTS {"defaultLengthDays":14}, ESTIMATION {"scale":"FIBONACCI"}); "{}" when none.
+message ProjectFeature {
+  string feature = 1;             // BOARD | BACKLOG | SPRINTS | ESTIMATION | TIMELINE
+  bool enabled = 2;
+  string config_json = 3;
+}
+
+message ListProjectFeaturesRequest {
+  string project_id = 1;
+}
+
+message ListProjectFeaturesResponse {
+  repeated ProjectFeature features = 1; // always every known feature, enabled or not
+}
+
+message SetProjectFeatureRequest {
+  string project_id = 1;
+  string feature = 2;
+  bool enabled = 3;
+  optional string config_json = 4; // absent = keep the stored config
+}
+
+// ── Sprint reports ──
+
+message GetSprintBurndownRequest {
+  string sprint_id = 1;
+  // IANA zone the days are cut in (e.g. "Asia/Tashkent"). Empty = UTC. Without it, work finished at
+  // 21:00 in Tashkent would count toward the next day.
+  string time_zone = 2;
+}
+
+message BurndownPoint {
+  string date = 1;                 // ISO yyyy-MM-dd
+  int32 remaining_points = 2;      // end-of-day remaining (scope − done)
+  int32 scope_points = 3;          // end-of-day total in sprint
+  int32 completed_points = 4;      // end-of-day done
+}
+
+message SprintBurndown {
+  Sprint sprint = 1;
+  // False when the sprint started before scope events were recorded: there is nothing to replay, so
+  // the client shows an explanation instead of a flat line.
+  bool has_data = 2;
+  int32 committed_points = 3;      // scope at start
+  repeated BurndownPoint points = 4; // one per day from start_date to min(end_date, today / completion)
+  int32 unestimated_tasks = 5;     // tasks in scope without points, so a flat chart can say why
+}
+
+message ListSprintVelocityRequest {
+  string project_id = 1;
+  int32 last = 2;                  // closed sprints, newest first; 0 = 7
+}
+
+message SprintVelocity {
+  string sprint_id = 1;
+  string name = 2;
+  int32 committed_points = 3;
+  int32 completed_points = 4;
+  bool has_data = 5;
+  optional string start_date = 6;
+  optional string end_date = 7;
+}
+
+message ListSprintVelocityResponse {
+  repeated SprintVelocity sprints = 1; // oldest → newest, for charting
+}
+
+// ── Archive ──
+
+message SetTaskArchivedRequest {
+  string task_id = 1;
+  bool archived = 2; // false restores. Sub-tasks follow their parent either way.
+}
+
+message ArchiveTasksInStatusRequest {
+  string status_id = 1; // "Archive all cards in this list"
+}
+
+message ArchiveTasksInStatusResponse {
+  int32 archived_count = 1;
 }
