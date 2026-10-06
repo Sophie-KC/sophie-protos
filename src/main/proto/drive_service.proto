@@ -245,6 +245,10 @@ message AddFileRequest {
   string name = 4;                    // display name; the file-service name is never used
   string relative_path = 5;           // optional "dir/sub/" prefix, created as needed
   string on_conflict = 6;             // FAIL (default) | KEEP_BOTH | REPLACE (FILE onto FILE only)
+  // The SHA-256 hex the client sent to RequestUpload. Proof of holding the content: a file id alone is
+  // not enough unless the caller uploaded it, because file-service dedup hands a DIFFERENT uploader's
+  // file id back for identical bytes — and any member could otherwise attach any file id in the org.
+  string checksum = 7;
 }
 
 message RenameItemRequest {
