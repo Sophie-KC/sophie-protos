@@ -58,7 +58,8 @@ service DriveService {
   // FILE only. Presigned GET (Content-Disposition: attachment, named after the item). Records a view.
   rpc GetDownloadUrl(GetDownloadUrlRequest) returns (DownloadUrl);
   rpc SetStarred(SetStarredRequest) returns (google.protobuf.Empty);
-  // RECENT | STARRED | SHARED_WITH_ME | TRASH. TRASH needs drive_id and lists trash roots only.
+  // RECENT | STARRED | SHARED_WITH_ME | TRASH | SEARCH. TRASH needs drive_id and lists trash roots only;
+  // SEARCH matches query against item names the caller can see (names only in v1).
   rpc ListView(ListViewRequest) returns (ListItemsResponse);
 
   // ── Sharing ───────────────────────────────────────────────────────────────────────────────────
@@ -118,6 +119,7 @@ message ItemCaps {
   bool can_share = 3;
   bool can_download = 4;
   bool can_delete_forever = 5;
+  bool can_move = 6;                  // edit rights minus CONTRIBUTOR (design role matrix)
 }
 
 message Item {
@@ -144,6 +146,10 @@ message Item {
   bool is_root = 21;
   string drive_kind = 22;             // PERSONAL | SHARED — lets "Shared with me"/"Recent" rows show where they live
   google.protobuf.Timestamp viewed_at = 23;    // RECENT view only
+  string owner_user_id = 24;          // My Drive owner; empty in a shared drive (show created_by as "Added by")
+  string shared_by = 25;              // SHARED_WITH_ME view only: who granted the caller access
+  google.protobuf.Timestamp shared_at = 26;    // SHARED_WITH_ME view only
+  int32 child_count = 27;             // FOLDER, GetItem only: live direct children
 }
 
 message Crumb {
@@ -287,10 +293,11 @@ message SetStarredRequest {
 
 message ListViewRequest {
   string org_id = 1;
-  string view = 2;                    // RECENT | STARRED | SHARED_WITH_ME | TRASH
+  string view = 2;                    // RECENT | STARRED | SHARED_WITH_ME | TRASH | SEARCH
   string drive_id = 3;                // TRASH only
   int32 page_size = 4;
   string page_token = 5;
+  string query = 6;                   // SEARCH only, at least 2 characters
 }
 
 // ── Sharing ─────────────────────────────────────────────────────────────────────────────────────
