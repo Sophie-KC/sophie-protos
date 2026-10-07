@@ -1,0 +1,412 @@
+syntax = "proto3";
+
+package com.platform.drive.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.driveservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Drive Service (claude/drive-design.md): a Google-Drive-style file tree — each member's private My Drive
+// plus org/team Shared drives — with folders, trash, sharing and share links. Owns metadata only: every
+// FILE item points at a file-service file (DRIVE_ITEM reference) and bytes go browser <-> MinIO through
+// presigned URLs, never through this service.
+//
+// Identity: every user-facing RPC acts as SophieSecurityContext.currentInternalUserId(), never a request
+// field. org_id on a request must match the org of every item/drive it names (cross-tenant guard). An item
+// the caller cannot see is NOT_FOUND, never PERMISSION_DENIED, so ids don't leak. The *PublicLink* RPCs are
+// SERVICE tier: api-gateway calls them for an anonymous visitor holding a link token.
+//
+// Roles (strings): drive roles MANAGER | CONTENT_MANAGER | CONTRIBUTOR | VIEWER (shared drives), item
+// roles OWNER | EDITOR | VIEWER. Item.my_role is the caller's EFFECTIVE role normalised to item roles:
+// OWNER (My Drive owner, or MANAGER on a shared drive), EDITOR, VIEWER — plus the fine-grained `caps`.
+service DriveService {
+  // ── Drives ────────────────────────────────────────────────────────────────────────────────────
+  // The caller's My Drive (created on first call) plus every shared drive they're a member of.
+  rpc ListDrives(ListDrivesRequest) returns (ListDrivesResponse);
+  // Caller becomes MANAGER. members may add more (USER | ROLE subjects).
+  rpc CreateSharedDrive(CreateSharedDriveRequest) returns (Drive);
+  // MANAGER only. Only fields present are changed.
+  rpc UpdateSharedDrive(UpdateSharedDriveRequest) returns (Drive);
+  // MANAGER only; FAILED_PRECONDITION unless the drive holds no items (trash included).
+  rpc DeleteSharedDrive(DeleteSharedDriveRequest) returns (google.protobuf.Empty);
+  rpc ListDriveMembers(ListDriveMembersRequest) returns (ListDriveMembersResponse);
+  // MANAGER only. Replaces the whole member set; FAILED_PRECONDITION if it would leave no USER MANAGER.
+  rpc SetDriveMembers(SetDriveMembersRequest) returns (ListDriveMembersResponse);
+
+  // ── Items ─────────────────────────────────────────────────────────────────────────────────────
+  // Item + breadcrumb ancestors (root first, only those the caller can see; a shared-with-me item's
+  // breadcrumb starts at the top-most item shared with them).
+  rpc GetItem(GetItemRequest) returns (GetItemResponse);
+  // Non-trashed children, folders first. Keyset-paged.
+  rpc ListChildren(ListChildrenRequest) returns (ListItemsResponse);
+  rpc CreateFolder(CreateFolderRequest) returns (Item);
+  // Registers an already-confirmed file-service upload as a FILE item. relative_path ("a/b/c.txt")
+  // creates any missing folders under parent_id on the way — that's how folder upload works.
+  rpc AddFile(AddFileRequest) returns (Item);
+  rpc RenameItem(RenameItemRequest) returns (Item);
+  // Batch ops report per item; a failure on one id never fails the rest.
+  rpc MoveItems(MoveItemsRequest) returns (BatchResult);
+  rpc CopyItems(CopyItemsRequest) returns (BatchResult);
+  rpc TrashItems(ItemIdsRequest) returns (BatchResult);
+  rpc RestoreItems(ItemIdsRequest) returns (BatchResult);
+  // Only trash roots (items the user trashed). Irreversible: rows deleted, file references revoked.
+  rpc DeleteItemsForever(ItemIdsRequest) returns (BatchResult);
+  // Every trash root in drive_id the caller may delete forever.
+  rpc EmptyTrash(EmptyTrashRequest) returns (BatchResult);
+  // FILE only. Presigned GET (Content-Disposition: attachment, named after the item). Records a view.
+  rpc GetDownloadUrl(GetDownloadUrlRequest) returns (DownloadUrl);
+  rpc SetStarred(SetStarredRequest) returns (google.protobuf.Empty);
+  // RECENT | STARRED | SHARED_WITH_ME | TRASH | SEARCH. TRASH needs drive_id and lists trash roots only;
+  // SEARCH matches query against item names the caller can see (names only in v1).
+  rpc ListView(ListViewRequest) returns (ListItemsResponse);
+
+  // ── Sharing ───────────────────────────────────────────────────────────────────────────────────
+  // Direct + inherited grants, general access and the live link. Any VIEWER+ may read it.
+  rpc GetItemAccess(GetItemAccessRequest) returns (ItemAccess);
+  // Replaces the item's DIRECT grants and general access (inherited ones are untouched).
+  rpc UpdateItemAccess(UpdateItemAccessRequest) returns (ItemAccess);
+  // Creates (or replaces) the item's single PUBLIC view-only link. The raw token is returned only here.
+  rpc CreateShareLink(CreateShareLinkRequest) returns (ShareLinkCreated);
+  rpc RevokeShareLink(RevokeShareLinkRequest) returns (google.protobuf.Empty);
+
+  // ── Org settings (Org Admin) ──────────────────────────────────────────────────────────────────
+  rpc GetOrgDriveSettings(GetOrgDriveSettingsRequest) returns (OrgDriveSettings);
+  rpc UpdateOrgDriveSettings(UpdateOrgDriveSettingsRequest) returns (OrgDriveSettings);
+
+  // ── Public links (SERVICE tier) ───────────────────────────────────────────────────────────────
+  // Unknown, revoked, expired, trashed, module-off and org-setting-off all answer the same NOT_FOUND.
+  rpc ResolvePublicLink(ResolvePublicLinkRequest) returns (PublicLinkView);
+  // Children of a folder at or under the link root.
+  rpc ListPublicLinkChildren(ListPublicLinkChildrenRequest) returns (ListPublicItemsResponse);
+  // FAILED_PRECONDITION when the link disallows download.
+  rpc GetPublicLinkDownloadUrl(GetPublicLinkDownloadUrlRequest) returns (DownloadUrl);
+}
+
+// ── Shared types ────────────────────────────────────────────────────────────────────────────────
+
+message Drive {
+  string id = 1;
+  string org_id = 2;
+  string kind = 3;                    // PERSONAL | SHARED
+  string name = 4;                    // empty for PERSONAL (client renders "My Drive")
+  string color = 5;                   // RampKey id; empty = default
+  string root_item_id = 6;
+  string owner_user_id = 7;           // PERSONAL only
+  string my_role = 8;                 // OWNER for PERSONAL; drive role for SHARED
+  bool allow_public_links = 9;
+  bool viewers_can_download = 10;
+  int32 member_count = 11;
+  google.protobuf.Timestamp created_at = 12;
+}
+
+message Subject {
+  string type = 1;                    // USER | ROLE
+  string id = 2;
+}
+
+message DriveMember {
+  Subject subject = 1;
+  string role = 2;                    // MANAGER | CONTENT_MANAGER | CONTRIBUTOR | VIEWER
+  string added_by = 3;
+  google.protobuf.Timestamp added_at = 4;
+}
+
+message ItemCaps {
+  bool can_edit = 1;                  // upload into / create folder / rename / move within drive
+  bool can_trash = 2;
+  bool can_share = 3;
+  bool can_download = 4;
+  bool can_delete_forever = 5;
+  bool can_move = 6;                  // edit rights minus CONTRIBUTOR (design role matrix)
+}
+
+message Item {
+  string id = 1;
+  string org_id = 2;
+  string drive_id = 3;
+  string parent_id = 4;               // empty only for a drive root
+  string kind = 5;                    // FOLDER | FILE
+  string name = 6;
+  string file_id = 7;                 // FILE only
+  int64 size_bytes = 8;               // FILE only
+  string mime_type = 9;               // FILE only
+  string created_by = 10;
+  google.protobuf.Timestamp created_at = 11;
+  string updated_by = 12;
+  google.protobuf.Timestamp updated_at = 13;
+  google.protobuf.Timestamp trashed_at = 14;   // unset unless trashed
+  string trashed_by = 15;
+  string original_parent_id = 16;     // trash roots only
+  bool starred = 17;                  // by the caller
+  bool shared = 18;                   // has direct grants, ORG general access or a live link
+  string my_role = 19;
+  ItemCaps caps = 20;
+  bool is_root = 21;
+  string drive_kind = 22;             // PERSONAL | SHARED — lets "Shared with me"/"Recent" rows show where they live
+  google.protobuf.Timestamp viewed_at = 23;    // RECENT view only
+  string owner_user_id = 24;          // My Drive owner; empty in a shared drive (show created_by as "Added by")
+  string shared_by = 25;              // SHARED_WITH_ME view only: who granted the caller access
+  google.protobuf.Timestamp shared_at = 26;    // SHARED_WITH_ME view only
+  int32 child_count = 27;             // FOLDER, GetItem only: live direct children
+}
+
+message Crumb {
+  string id = 1;
+  string name = 2;
+  bool is_root = 3;
+}
+
+message ItemResult {
+  string item_id = 1;
+  bool ok = 2;
+  // NOT_FOUND | PERMISSION_DENIED | NAME_CONFLICT | INVALID_TARGET | FAILED_PRECONDITION | LIMIT_EXCEEDED
+  string error = 3;
+  string message = 4;
+  Item item = 5;                      // the resulting item on success (the copy, for CopyItems)
+}
+
+message BatchResult {
+  repeated ItemResult results = 1;
+}
+
+message DownloadUrl {
+  string url = 1;
+  int32 expires_in_seconds = 2;
+}
+
+// ── Drives ──────────────────────────────────────────────────────────────────────────────────────
+
+message ListDrivesRequest { string org_id = 1; }
+message ListDrivesResponse {
+  Drive my_drive = 1;
+  repeated Drive shared_drives = 2;
+}
+
+message MemberSpec {
+  Subject subject = 1;
+  string role = 2;
+}
+
+message CreateSharedDriveRequest {
+  string org_id = 1;
+  string name = 2;
+  string color = 3;
+  repeated MemberSpec members = 4;
+}
+
+message UpdateSharedDriveRequest {
+  string org_id = 1;
+  string drive_id = 2;
+  optional string name = 3;
+  optional string color = 4;
+  optional bool allow_public_links = 5;
+  optional bool viewers_can_download = 6;
+}
+
+message DeleteSharedDriveRequest { string org_id = 1; string drive_id = 2; }
+message ListDriveMembersRequest { string org_id = 1; string drive_id = 2; }
+message ListDriveMembersResponse { repeated DriveMember members = 1; }
+message SetDriveMembersRequest {
+  string org_id = 1;
+  string drive_id = 2;
+  repeated MemberSpec members = 3;
+}
+
+// ── Items ───────────────────────────────────────────────────────────────────────────────────────
+
+message GetItemRequest { string org_id = 1; string item_id = 2; }
+message GetItemResponse {
+  Item item = 1;
+  repeated Crumb ancestors = 2;       // root first, excluding the item itself
+  Drive drive = 3;
+}
+
+message ListChildrenRequest {
+  string org_id = 1;
+  string parent_id = 2;
+  string sort = 3;                    // NAME (default) | MODIFIED | SIZE ; folders always first
+  bool descending = 4;
+  int32 page_size = 5;                // default 100, max 500
+  string page_token = 6;
+}
+
+message ListItemsResponse {
+  repeated Item items = 1;
+  string next_page_token = 2;         // empty = last page
+}
+
+message CreateFolderRequest {
+  string org_id = 1;
+  string parent_id = 2;
+  string name = 3;
+  string on_conflict = 4;             // FAIL (default) | KEEP_BOTH
+}
+
+message AddFileRequest {
+  string org_id = 1;
+  string parent_id = 2;
+  string file_id = 3;                 // a confirmed (ACTIVE) file-service file in org_id
+  string name = 4;                    // display name; the file-service name is never used
+  string relative_path = 5;           // optional "dir/sub/" prefix, created as needed
+  string on_conflict = 6;             // FAIL (default) | KEEP_BOTH | REPLACE (FILE onto FILE only)
+  // The SHA-256 hex the client sent to RequestUpload. Proof of holding the content: a file id alone is
+  // not enough unless the caller uploaded it, because file-service dedup hands a DIFFERENT uploader's
+  // file id back for identical bytes — and any member could otherwise attach any file id in the org.
+  string checksum = 7;
+}
+
+message RenameItemRequest {
+  string org_id = 1;
+  string item_id = 2;
+  string name = 3;
+}
+
+message MoveItemsRequest {
+  string org_id = 1;
+  repeated string item_ids = 2;
+  string target_parent_id = 3;
+  string on_conflict = 4;             // FAIL (default) | KEEP_BOTH
+}
+
+message CopyItemsRequest {
+  string org_id = 1;
+  repeated string item_ids = 2;
+  string target_parent_id = 3;        // empty = same folder as each source ("Copy of …")
+}
+
+message ItemIdsRequest {
+  string org_id = 1;
+  repeated string item_ids = 2;
+}
+
+message EmptyTrashRequest { string org_id = 1; string drive_id = 2; }
+
+message GetDownloadUrlRequest { string org_id = 1; string item_id = 2; }
+
+message SetStarredRequest {
+  string org_id = 1;
+  string item_id = 2;
+  bool starred = 3;
+}
+
+message ListViewRequest {
+  string org_id = 1;
+  string view = 2;                    // RECENT | STARRED | SHARED_WITH_ME | TRASH | SEARCH
+  string drive_id = 3;                // TRASH only
+  int32 page_size = 4;
+  string page_token = 5;
+  string query = 6;                   // SEARCH only, at least 2 characters
+}
+
+// ── Sharing ─────────────────────────────────────────────────────────────────────────────────────
+
+message GetItemAccessRequest { string org_id = 1; string item_id = 2; }
+
+message AccessGrant {
+  Subject subject = 1;
+  string role = 2;                    // OWNER (My Drive owner, read-only row) | EDITOR | VIEWER | drive role
+  // Empty = direct grant on this item. Otherwise the item it's inherited from (or "drive" for shared-
+  // drive membership) — inherited rows can't be edited here.
+  string inherited_from_item_id = 3;
+  string inherited_from_name = 4;
+  bool from_drive_membership = 5;
+}
+
+message ShareLink {
+  string id = 1;
+  bool allow_download = 2;
+  google.protobuf.Timestamp expires_at = 3;    // unset = never
+  string created_by = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // The URL is only known at creation (token is stored hashed); afterwards the client shows
+  // "Link active · Copy is unavailable — create a new link" or keeps the URL it was given.
+}
+
+message ItemAccess {
+  string item_id = 1;
+  repeated AccessGrant grants = 2;
+  string general_access = 3;          // RESTRICTED | ORG
+  string general_role = 4;            // VIEWER | EDITOR when ORG
+  string inherited_general_access = 5;   // VIEWER | EDITOR: the strongest ORG general role inherited from an ancestor; empty = none
+  ShareLink link = 6;                 // unset = no live link
+  bool public_links_allowed = 7;      // org setting AND (shared drive) drive setting
+  bool can_share = 8;
+}
+
+message GrantSpec {
+  Subject subject = 1;
+  string role = 2;                    // EDITOR | VIEWER
+}
+
+message UpdateItemAccessRequest {
+  string org_id = 1;
+  string item_id = 2;
+  repeated GrantSpec grants = 3;      // the complete DIRECT grant set
+  string general_access = 4;          // RESTRICTED | ORG
+  string general_role = 5;
+  bool notify = 6;                    // send drive.shared to newly added USER subjects
+  string message = 7;                 // optional note in that notification
+}
+
+message CreateShareLinkRequest {
+  string org_id = 1;
+  string item_id = 2;
+  bool allow_download = 3;
+  google.protobuf.Timestamp expires_at = 4;    // unset = never
+}
+
+message ShareLinkCreated {
+  ShareLink link = 1;
+  string token = 2;                   // raw token, shown once; gateway turns it into the /s/{token} URL
+}
+
+message RevokeShareLinkRequest { string org_id = 1; string item_id = 2; }
+
+message GetOrgDriveSettingsRequest { string org_id = 1; }
+message OrgDriveSettings {
+  string org_id = 1;
+  bool public_links_enabled = 2;
+}
+message UpdateOrgDriveSettingsRequest {
+  string org_id = 1;
+  bool public_links_enabled = 2;
+}
+
+// ── Public links ────────────────────────────────────────────────────────────────────────────────
+
+message PublicItem {
+  string id = 1;
+  string kind = 2;                    // FOLDER | FILE
+  string name = 3;
+  int64 size_bytes = 4;
+  string mime_type = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message ResolvePublicLinkRequest { string token = 1; }
+message PublicLinkView {
+  string org_id = 1;
+  PublicItem root = 2;
+  string owner_name = 3;              // display name of the link creator
+  bool allow_download = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message ListPublicLinkChildrenRequest {
+  string token = 1;
+  string parent_id = 2;               // empty = the link root
+  int32 page_size = 3;
+  string page_token = 4;
+}
+message ListPublicItemsResponse {
+  repeated PublicItem items = 1;
+  repeated PublicItem ancestors = 2;  // link root first, down to parent_id (exclusive)
+  string next_page_token = 3;
+}
+
+message GetPublicLinkDownloadUrlRequest {
+  string token = 1;
+  string item_id = 2;                 // empty = the link root (must be a FILE)
+}
