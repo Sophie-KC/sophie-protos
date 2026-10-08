@@ -203,6 +203,23 @@ service TaskService {
   // ── Archive (Trello-style: off every view, nothing deleted; restorable) ──
   rpc SetTaskArchived(SetTaskArchivedRequest) returns (Task);                                  // project member
   rpc ArchiveTasksInStatus(ArchiveTasksInStatusRequest) returns (ArchiveTasksInStatusResponse); // project member
+
+  // ── Import (claude/atlassian-import-design.md §14.1) ──
+  // SERVICE tier, called only by import-service, which has already checked that imported_by is an Org
+  // Admin of org_id. Every row carries an id the caller chose up front, and every write is
+  // insert-if-absent by that id: a resent batch reports the rows as existing_ids and changes nothing.
+  // Each call is one transaction — a bad row fails the whole batch with INVALID_ARGUMENT naming it.
+  // None of these notify anyone, publish live events, or write activity rows; search indexing happens
+  // as usual through the outbox. They only ever CREATE — there is no import update or delete.
+  rpc ImportProject(ImportProjectRequest) returns (Project);
+  rpc ImportTaskTypes(ImportTaskTypesRequest) returns (ImportBatchResponse);
+  rpc ImportCustomFields(ImportCustomFieldsRequest) returns (ImportBatchResponse);
+  rpc ImportSprints(ImportSprintsRequest) returns (ImportBatchResponse);
+  rpc ImportTasks(ImportTasksRequest) returns (ImportBatchResponse);
+  rpc ImportTaskBlocks(ImportTaskBlocksRequest) returns (ImportBatchResponse);
+  rpc ImportTaskComments(ImportTaskCommentsRequest) returns (ImportBatchResponse);
+  // Raises next_task_number above every imported number. Safe to call more than once.
+  rpc FinishProjectImport(FinishProjectImportRequest) returns (Project);
 }
 
 // ===================== Messages =====================
@@ -1451,4 +1468,167 @@ message ArchiveTasksInStatusRequest {
 
 message ArchiveTasksInStatusResponse {
   int32 archived_count = 1;
+}
+
+// ===================== Import (import-service only) =====================
+
+// Which of the request's ids this call created, and which already existed (a resent batch).
+message ImportBatchResponse {
+  repeated string created_ids = 1;
+  repeated string existing_ids = 2;
+}
+
+message ImportProjectRequest {
+  string id = 1;                       // chosen by the caller
+  string org_id = 2;
+  string imported_by = 3;              // internal users.id — the project's creator and its first admin
+  string key = 4;                      // same rules as CreateProject: unique per org, at most 10 characters
+  string name = 5;
+  string description = 6;              // optional
+  // Decides the project's FEATURES only (kanban | scrum | waterfall; empty = kanban). Its statuses are
+  // not seeded — the project gets exactly `statuses` below.
+  string template_key = 7;
+  repeated ImportStatus statuses = 8;  // at least one; board order = list order; any → any transitions
+  repeated ImportLabel labels = 9;
+  // Set above the source's highest issue number, so a task someone creates by hand while the import
+  // is still running can never take a number an imported task needs. At least 1.
+  int32 next_task_number = 10;
+  google.protobuf.Timestamp created_at = 11; // absent = now
+}
+
+message ImportStatus {
+  string id = 1;
+  string name = 2;                     // at most 50 characters, unique within the project
+  string status_group = 3;             // TODO | IN_PROGRESS | DONE
+  string color = 4;                    // optional ramp key, e.g. "blue" — never a hex
+}
+
+message ImportLabel {
+  string id = 1;
+  string name = 2;                     // at most 50 characters, unique within the project
+  string color = 3;                    // optional, same values CreateLabel accepts
+}
+
+// Org-owned task types, for source issue types that match none of the five system types.
+message ImportTaskTypesRequest {
+  string org_id = 1;
+  string imported_by = 2;
+  repeated ImportTaskType types = 3;
+}
+
+message ImportTaskType {
+  string id = 1;
+  string name = 2;                     // at most 50 characters, unique within the org
+  string icon = 3;                     // icon id (e.g. "diamond-outline"), same as CreateTaskType
+  string color = 4;                    // ramp key
+}
+
+// Creates any field not yet present (by id) — needs the tasks.custom.fields feature and room under
+// tasks.custom_fields.max, exactly as CreateCustomField — adds any option not yet present, and attaches
+// every listed field to project_id. A field already created for another project in the same org is
+// reused and only attached here, which is how one source field shared by several projects comes across.
+message ImportCustomFieldsRequest {
+  string org_id = 1;
+  string imported_by = 2;
+  string project_id = 3;
+  repeated ImportCustomField fields = 4;
+}
+
+message ImportCustomField {
+  string id = 1;
+  string name = 2;
+  string type = 3;                     // one of the ten CustomField types
+  string description = 4;              // optional
+  string config_json = 5;              // as CreateCustomField; empty = {}
+  repeated ImportFieldOption options = 6; // DROPDOWN / LABELS only; position = list order
+}
+
+message ImportFieldOption {
+  string id = 1;
+  string label = 2;
+  string color = 3;                    // optional
+}
+
+// Sprints keep their real state and history timestamps. At most one ACTIVE per project, as always.
+message ImportSprintsRequest {
+  string org_id = 1;
+  string project_id = 2;
+  repeated ImportSprint sprints = 3;
+}
+
+message ImportSprint {
+  string id = 1;
+  string name = 2;
+  string goal = 3;                     // optional
+  string state = 4;                    // FUTURE | ACTIVE | COMPLETE
+  string start_date = 5;               // optional ISO yyyy-MM-dd
+  string end_date = 6;                 // optional ISO yyyy-MM-dd
+  google.protobuf.Timestamp started_at = 7;   // ACTIVE / COMPLETE
+  google.protobuf.Timestamp completed_at = 8; // COMPLETE
+}
+
+// Up to 200 tasks. An epic or parent referenced here must already exist or come EARLIER in this batch.
+message ImportTasksRequest {
+  string org_id = 1;
+  string project_id = 2;
+  string imported_by = 3;
+  repeated ImportTask tasks = 4;
+}
+
+message ImportTask {
+  string id = 1;
+  int32 task_number = 2;               // kept as given; unique within the project
+  string task_type_id = 3;
+  string status_id = 4;
+  string title = 5;
+  optional string description = 6;    // TipTap JSON
+  string priority = 7;                 // HIGHEST | HIGH | MEDIUM | LOW | LOWEST; empty = MEDIUM
+  optional int32 story_points = 8;
+  optional string assignee_id = 9;     // must be an org member
+  string reporter_id = 10;             // must be an org member; empty = imported_by
+  optional string sprint_id = 11;      // any state, including COMPLETE: this is history
+  optional string epic_id = 12;
+  optional string parent_task_id = 13;
+  repeated string label_ids = 14;
+  optional string due_date = 15;       // ISO yyyy-MM-dd
+  optional string start_date = 16;     // ISO yyyy-MM-dd, never after due_date
+  repeated FieldValue field_values = 17; // fields must be attached to the project
+  repeated string attachment_file_ids = 18; // confirmed File Service files of this org → the task's shelf
+  google.protobuf.Timestamp created_at = 19; // absent = now
+  google.protobuf.Timestamp updated_at = 20; // absent = created_at
+  optional google.protobuf.Timestamp archived_at = 21;
+}
+
+// "blocks" links only (the one typed link Tasks has). Both tasks must be in org_id; they may be in
+// different projects. Ids in the response are "<blocking_task_id>:<blocked_task_id>".
+message ImportTaskBlocksRequest {
+  string org_id = 1;
+  repeated ImportTaskBlock blocks = 2;
+}
+
+message ImportTaskBlock {
+  string blocking_task_id = 1;
+  string blocked_task_id = 2;
+}
+
+// Up to 500 comments. A reply's parent must already exist or come earlier in the batch; replies are
+// one level deep, as in the app.
+message ImportTaskCommentsRequest {
+  string org_id = 1;
+  repeated ImportTaskComment comments = 2;
+}
+
+message ImportTaskComment {
+  string id = 1;
+  string task_id = 2;
+  optional string parent_comment_id = 3;
+  string author_id = 4;                // must be an org member
+  string content = 5;                  // TipTap JSON
+  google.protobuf.Timestamp created_at = 6;
+  optional google.protobuf.Timestamp edited_at = 7;
+}
+
+message FinishProjectImportRequest {
+  string org_id = 1;
+  string project_id = 2;
 }

@@ -175,6 +175,18 @@ service DocService {
   // effort has built. A real Page->Space org join (Page has no org_id of its own); ACTIVE (not
   // soft-deleted) pages in ACTIVE (not soft-deleted) spaces only.
   rpc GetDocCountForStaff(GetDocCountForStaffRequest) returns (GetDocCountForStaffResponse);
+
+  // ── Import (claude/atlassian-import-design.md §14.2) ──
+  // SERVICE tier, called only by import-service, which has already checked that imported_by is an Org
+  // Admin of org_id. Same contract as task-service's Import* RPCs: caller-chosen ids, insert-if-absent
+  // (a resent batch reports existing_ids and changes nothing), one transaction per call, no
+  // notifications or live events, create-only. ImportPages never touches collab state and never
+  // republishes an existing page — a page someone has opened is owned by its collab checkpoint.
+  rpc ImportSpace(ImportSpaceRequest) returns (Space);
+  rpc ImportPages(ImportPagesRequest) returns (ImportBatchResponse);
+  rpc ImportPageComments(ImportPageCommentsRequest) returns (ImportBatchResponse);
+  // Sets the space's homepage once its pages exist. Safe to call more than once.
+  rpc FinishSpaceImport(FinishSpaceImportRequest) returns (Space);
 }
 
 message Space {
@@ -959,4 +971,74 @@ message GetDocCountForStaffRequest {
 
 message GetDocCountForStaffResponse {
   int64 count = 1;
+}
+
+// ===================== Import (import-service only) =====================
+
+// Which of the request's ids this call created, and which already existed (a resent batch).
+message ImportBatchResponse {
+  repeated string created_ids = 1;
+  repeated string existing_ids = 2;
+}
+
+// Same rules as CreateSpace (key unique per org, ≤20 characters, docs.spaces.max, Docs module on);
+// imported_by becomes its creator and its first space admin.
+message ImportSpaceRequest {
+  string id = 1;
+  string org_id = 2;
+  string imported_by = 3;
+  string key = 4;
+  string name = 5;
+  string description = 6;              // optional
+  string icon = 7;                     // optional emoji, ≤10 chars
+  google.protobuf.Timestamp created_at = 8; // absent = now
+}
+
+// Up to 100 pages. A parent must already exist or come EARLIER in this batch (import-service walks the
+// tree parents-first). Each page is created as RICH_TEXT with one published version in the org's base
+// locale, exactly what PublishPage would have produced, but stamped with the given authors and times.
+message ImportPagesRequest {
+  string org_id = 1;
+  string space_id = 2;
+  string imported_by = 3;
+  repeated ImportPage pages = 4;
+}
+
+message ImportPage {
+  string id = 1;
+  optional string parent_page_id = 2;
+  double position = 3;                 // sibling order, ascending
+  string title = 4;                    // at most 500 characters
+  string content = 5;                  // TipTap JSON ({"type":"doc",...})
+  string author_id = 6;                // the page's creator; must be an org member; empty = imported_by
+  google.protobuf.Timestamp created_at = 7;
+  string version_author_id = 8;        // who published the imported version; empty = author_id
+  google.protobuf.Timestamp version_created_at = 9; // absent = created_at
+  repeated string attachment_file_ids = 10; // confirmed File Service files of this org → the page's shelf
+  // Non-empty = the page (and so its subtree) is visible only to these org members. Needs the
+  // permissions.page.restrictions feature — refused without it, so content is never imported open.
+  repeated string restricted_to_user_ids = 11;
+}
+
+// Up to 500 comments, page-level (no inline anchor). A reply's parent must already exist or come
+// earlier in the batch; replies are one level deep.
+message ImportPageCommentsRequest {
+  string org_id = 1;
+  repeated ImportPageComment comments = 2;
+}
+
+message ImportPageComment {
+  string id = 1;
+  string page_id = 2;
+  optional string parent_comment_id = 3;
+  string author_id = 4;                // must be an org member
+  string content = 5;                  // TipTap JSON
+  google.protobuf.Timestamp created_at = 6;
+  optional google.protobuf.Timestamp edited_at = 7;
+}
+
+message FinishSpaceImportRequest {
+  string org_id = 1;
+  string space_id = 2;
+  optional string homepage_page_id = 3; // a page of this space
 }

@@ -133,6 +133,10 @@ service OrgService {
   // javadoc on why a SERVICE requirement rejects nobody — so the handler enforces ServicePrincipal
   // directly, the way HasPermission does.
   rpc FilterOrgMembers(FilterOrgMembersRequest) returns (FilterOrgMembersResponse);
+  // SERVICE tier. Which of these emails belong to members of org_id — import-service matching people
+  // from Jira/Confluence (claude/atlassian-import-design.md §9). Case-insensitive; returns members only
+  // (ACTIVE and PENDING_ACTIVATION), never users of other orgs. At most 500 emails per call.
+  rpc LookupOrgMembersByEmail(LookupOrgMembersByEmailRequest) returns (LookupOrgMembersByEmailResponse);
 
   // Permission catalog — global, not org-scoped; no Org-Admin check (read-only reference data).
   rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
@@ -1317,4 +1321,20 @@ message ModuleState {
 message OrgModules {
   string org_id = 1;
   repeated ModuleState modules = 2;  // every switchable module, in a fixed order
+}
+
+message LookupOrgMembersByEmailRequest {
+  string org_id = 1;
+  repeated string emails = 2;
+}
+
+message LookupOrgMembersByEmailResponse {
+  repeated OrgMemberEmailMatch matches = 1; // order not guaranteed; unmatched emails are simply absent
+}
+
+message OrgMemberEmailMatch {
+  string email = 1;                    // as sent in the request
+  string user_id = 2;                  // internal users.id
+  string display_name = 3;
+  string status = 4;                   // ACTIVE | PENDING_ACTIVATION
 }
