@@ -810,6 +810,11 @@ message ListUserScopeAccessResponse {
 message FilterOrgMembersRequest {
   string org_id = 1;
   repeated string user_ids = 2; // internal users.id, never a Keycloak sub
+  // Also count PENDING_ACTIVATION members — people invited but not yet signed in, who already hold a
+  // seat. Only the Jira/Confluence importer sets this: a person it invited must be able to author the
+  // issues and pages imported for them before they first sign in (atlassian-import-design.md §9).
+  // Absent/false = ACTIVE only, exactly what every caller got before this field existed.
+  bool include_pending = 3;
 }
 
 message FilterOrgMembersResponse {
