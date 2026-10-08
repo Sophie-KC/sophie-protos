@@ -1599,8 +1599,9 @@ message ImportTask {
   optional google.protobuf.Timestamp archived_at = 21;
 }
 
-// "blocks" links only (the one typed link Tasks has). Both tasks must be in org_id; they may be in
-// different projects. Ids in the response are "<blocking_task_id>:<blocked_task_id>".
+// "blocks" links only (the one typed link Tasks has). Same rule as BlockTask: both tasks in one project
+// of org_id, never a task with itself — a cross-project source link belongs in the description instead.
+// Ids in the response are "<blocking_task_id>:<blocked_task_id>".
 message ImportTaskBlocksRequest {
   string org_id = 1;
   repeated ImportTaskBlock blocks = 2;
