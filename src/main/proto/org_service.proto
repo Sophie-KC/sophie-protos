@@ -1253,6 +1253,10 @@ message InviteLink {
   google.protobuf.Timestamp created_at = 4;
   string created_by = 5;
   int32 use_count = 6;
+  // The raw token (base64url), so an admin can copy the active link again. Set on GetInviteLink only
+  // when org-service stores links encrypted (INVITE_LINK_TOKEN_KEY) and the link was created after
+  // that; empty otherwise — the client then offers "create a new link" instead of "copy".
+  string token = 7;
 }
 
 message InviteLinkWithToken {
