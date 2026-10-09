@@ -7,7 +7,7 @@ option java_package = "org.sophie.importservice.grpc";
 
 import "google/protobuf/timestamp.proto";
 
-// Import Service: one-time imports of Jira (and later Confluence) into Tasks and Docs
+// Import Service: one-time imports of Jira and Confluence into Tasks and Docs
 // (claude/atlassian-import-design.md). The Gateway calls these on behalf of a signed-in Org Admin; every
 // RPC takes the org_id it acts in and refuses anyone who is not that org's admin. The long work runs in
 // import-service's own background worker, which writes through task-service's and doc-service's Import*
@@ -39,7 +39,7 @@ message CreateImportJobRequest {
   string base_url = 3;             // https://<site>.atlassian.net
   string email = 4;                // the Atlassian account the API token belongs to
   string api_token = 5;            // never returned, never logged
-  repeated string products = 6;    // JIRA (CONFLUENCE arrives in Phase 2)
+  repeated string products = 6;    // JIRA and/or CONFLUENCE
 }
 
 message GetImportJobRequest {
@@ -86,6 +86,18 @@ message ImportDiscovery {
   bool attachment_bytes_estimated = 5; // sampled rather than summed (very large sites)
   int32 visible_projects = 6;      // what this token can see …
   int32 total_projects = 7;        // … against what the site has; a gap means the token is not an admin's
+  repeated DiscoveredSpace spaces = 8; // Confluence (Phase 2, §23); attachment_bytes above includes theirs
+}
+
+message DiscoveredSpace {
+  string confluence_id = 1;
+  string key = 2;
+  string name = 3;
+  string type = 4;                 // global | personal
+  bool archived = 5;
+  int32 page_count = 6;            // current pages (and folders), not drafts or trash
+  int32 blog_count = 7;
+  int64 attachment_bytes = 8;
 }
 
 message DiscoveredProject {
@@ -98,7 +110,9 @@ message DiscoveredProject {
 }
 
 message ImportCounter {
-  string kind = 1;                 // PROJECT | ISSUE | COMMENT | ATTACHMENT | SPRINT | FIELD | PERSON
+  // PROJECT | ISSUE | COMMENT | ATTACHMENT | SPRINT | FIELD | PERSON
+  // | SPACE | PAGE | PAGE_COMMENT | PAGE_ATTACHMENT (Confluence)
+  string kind = 1;
   int32 total = 2;
   int32 done = 3;
   int32 skipped = 4;
@@ -125,6 +139,7 @@ message ImportMapping {
   repeated ValueChoice values = 4;
   ImportOptions options = 5;
   int32 version = 6;               // send it back on update; a stale version is refused (two tabs)
+  repeated SpaceChoice spaces = 7;
 }
 
 message ProjectChoice {
@@ -139,6 +154,21 @@ message ProjectChoice {
   string key_problem = 9;          // empty | INVALID | TAKEN — the admin must pick another sophie_key
 }
 
+// A Confluence space and what becomes of it. Personal and archived spaces start unselected (§23 C3).
+message SpaceChoice {
+  string confluence_id = 1;
+  string confluence_key = 2;
+  string name = 3;
+  bool selected = 4;
+  string sophie_key = 5;           // defaults to the Confluence key (Docs keys: at most 20 characters)
+  int32 page_count = 6;
+  string key_problem = 7;          // empty | INVALID | DUPLICATE — the admin must pick another sophie_key
+  string type = 8;                 // global | personal
+  bool archived = 9;
+  bool existing_space = 10;        // an earlier import of this site made it: added to, key fixed
+  int32 blog_count = 11;
+}
+
 message PersonChoice {
   string account_id = 1;           // Atlassian accountId
   string display_name = 2;
@@ -148,7 +178,7 @@ message PersonChoice {
   string sophie_user_id = 6;       // MAP target (an org member)
   string suggested_user_id = 7;    // what matching proposed; never applied without the admin
   string suggestion = 8;           // EMAIL | CSV | NAME — how it was found; NAME is only ever a suggestion
-  int32 item_count = 9;            // issues + comments that name them
+  int32 item_count = 9;            // issues, pages and comments that name them
 }
 
 // One source value and what it becomes. `target` vocabulary per kind:
@@ -171,9 +201,13 @@ message ImportOptions {
   bool archived_issues = 2;        // default true
   bool secured_issues = 3;         // default false — §12.1: imported visible to the whole project
   bool deactivated_people_as_attribution = 4; // default true
+  bool blog_posts = 5;             // default false — under a "Blog" page in their space (§23 C3)
+  bool inline_comments = 6;        // default true — as page comments quoting the highlighted text (C4)
+  bool resolved_comments = 7;      // default false — resolved inline comments too
 }
 
-// Only the rows listed change, matched by their key (jira_id / account_id / kind+scope+external_id).
+// Only the rows listed change, matched by their key (jira_id / confluence_id / account_id /
+// kind+scope+external_id).
 message UpdateImportMappingRequest {
   string org_id = 1;
   string job_id = 2;
@@ -182,6 +216,7 @@ message UpdateImportMappingRequest {
   repeated PersonChoice people = 5;
   repeated ValueChoice values = 6;
   optional ImportOptions options = 7;
+  repeated SpaceChoice spaces = 8;
 }
 
 message ApplyPeopleCsvRequest {
@@ -217,7 +252,7 @@ message ListImportReportItemsResponse {
 
 message ImportReportItem {
   string kind = 1;
-  string external_key = 2;         // PROJ-123, a filename, a field name
+  string external_key = 2;         // PROJ-123, a page title, a filename, a field name
   string state = 3;
   string reason = 4;               // OVERSIZE_FILE | BLOCKED_EXTENSION | RESTRICTED | QUOTA | SOURCE_404 | ...
   string detail = 5;
