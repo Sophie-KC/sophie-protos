@@ -315,6 +315,19 @@ service OrgService {
   // account (the visitor should sign in and accept instead); NOT_FOUND for an unusable link.
   rpc SignUpWithInviteLink(SignUpWithInviteLinkRequest) returns (OrganizationMembership);
 
+  // ── Legal documents (Terms of Service / Public Offer, Privacy Policy) ─────────────────────────────
+  // Which documents are published and at which version (org-service config; a document with no
+  // version is unpublished and never asked for). SERVICE tier: the Gateway serves it anonymously to
+  // the signup and landing pages.
+  rpc ListLegalDocuments(google.protobuf.Empty) returns (ListLegalDocumentsResponse);
+  // The caller's published documents whose CURRENT version they have not accepted. Non-empty means
+  // the web app holds them at an "accept to continue" screen.
+  rpc GetMyLegalStatus(google.protobuf.Empty) returns (LegalStatus);
+  // Records the caller's acceptance. Each (code, version) must be a published document's current
+  // version — accepting a superseded one is FAILED_PRECONDITION, so a stale tab can't record consent
+  // to text the user was never shown.
+  rpc AcceptLegalDocuments(AcceptLegalDocumentsRequest) returns (LegalStatus);
+
   // ── Org modules (claude/org-modules-design.md) ─────────────────────────────────────────────────
   // Which of the switchable modules (chat, tasks, docs, calendar, apps) an org has turned on. A module
   // with no stored row is ON, so every org that predates this has everything. Switching a module off
@@ -383,11 +396,17 @@ message SignUpRequest {
   string temporary_password = 4;
   string org_name = 5;
   string org_subdomain = 6;
+  // What the person ticked on the signup form. Optional: a signup without it still succeeds and the
+  // person is asked to accept on first sign-in (GetMyLegalStatus), so an older client never breaks.
+  repeated LegalAcceptance legal_acceptances = 7;
+  AcceptanceContext acceptance_context = 8;
 }
 
 message CompleteFederatedSignUpRequest {
   string org_name = 1;
   string org_subdomain = 2;
+  repeated LegalAcceptance legal_acceptances = 3; // optional, as on SignUpRequest
+  AcceptanceContext acceptance_context = 4;
 }
 
 message Organization {
@@ -1307,6 +1326,40 @@ message SignUpWithInviteLinkRequest {
   string first_name = 3;
   string last_name = 4;
   string password = 5;
+  repeated LegalAcceptance legal_acceptances = 6; // optional, as on SignUpRequest
+  AcceptanceContext acceptance_context = 7;
+}
+
+// ── Legal documents ─────────────────────────────────────────────────────────────────────────────
+
+message LegalDocument {
+  string code = 1;     // TERMS | PRIVACY
+  string version = 2;  // e.g. "2026-09-02" — the text's effective date
+  string path = 3;     // where the web app renders it, e.g. "/privacy"
+}
+
+message ListLegalDocumentsResponse {
+  repeated LegalDocument documents = 1;
+}
+
+message LegalStatus {
+  repeated LegalDocument pending = 1;
+}
+
+message LegalAcceptance {
+  string code = 1;
+  string version = 2;
+}
+
+// Evidence recorded with an acceptance. Set by the Gateway from the HTTP request, never by the client.
+message AcceptanceContext {
+  string client_ip = 1;
+  string user_agent = 2;
+}
+
+message AcceptLegalDocumentsRequest {
+  repeated LegalAcceptance acceptances = 1;
+  AcceptanceContext acceptance_context = 2;
 }
 
 message GetOrgModulesRequest {
