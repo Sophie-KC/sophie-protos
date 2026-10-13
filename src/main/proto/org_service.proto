@@ -328,6 +328,18 @@ service OrgService {
   // to text the user was never shown.
   rpc AcceptLegalDocuments(AcceptLegalDocumentsRequest) returns (LegalStatus);
 
+  // ── Account deletion (claude/account-deletion-export-design.md §3) ──────────────────────────────
+  // What deleting the caller's account would do right now: orgs that block it (last Org Admin with
+  // other members — hand over first) and orgs that go with it (no other members). Also the pending
+  // state once requested.
+  rpc GetMyAccountDeletion(google.protobuf.Empty) returns (AccountDeletion);
+  // Disables the account now (sign-in ends, Keycloak user disabled, API tokens and devices removed) and
+  // schedules the irreversible purge for 30 days later. FAILED_PRECONDITION while any org blocks it;
+  // INVALID_ARGUMENT unless confirm_email is the account's email.
+  rpc RequestMyAccountDeletion(RequestMyAccountDeletionRequest) returns (AccountDeletion);
+  // Platform staff (live ACTIVE PLATFORM_ADMIN): undo a pending deletion inside the 30 days.
+  rpc RestoreAccountForStaff(RestoreAccountForStaffRequest) returns (AccountDeletion);
+
   // ── Org modules (claude/org-modules-design.md) ─────────────────────────────────────────────────
   // Which of the switchable modules (chat, tasks, docs, calendar, apps) an org has turned on. A module
   // with no stored row is ON, so every org that predates this has everything. Switching a module off
@@ -1360,6 +1372,31 @@ message AcceptanceContext {
 message AcceptLegalDocumentsRequest {
   repeated LegalAcceptance acceptances = 1;
   AcceptanceContext acceptance_context = 2;
+}
+
+// ── Account deletion ────────────────────────────────────────────────────────────────────────────
+
+message AccountDeletion {
+  string status = 1;                                   // ACTIVE | DELETION_PENDING
+  google.protobuf.Timestamp requested_at = 2;          // unset while ACTIVE
+  google.protobuf.Timestamp purge_after = 3;           // unset while ACTIVE
+  repeated AccountDeletionOrg blocking_orgs = 4;       // must hand over Org Admin first
+  repeated AccountDeletionOrg orgs_deleted_with_account = 5;  // no other members: deleted with the account
+}
+
+message AccountDeletionOrg {
+  string org_id = 1;
+  string name = 2;
+  string subdomain = 3;
+  int32 member_count = 4;
+}
+
+message RequestMyAccountDeletionRequest {
+  string confirm_email = 1;   // must equal the account's email (case-insensitive)
+}
+
+message RestoreAccountForStaffRequest {
+  string user_id = 1;
 }
 
 message GetOrgModulesRequest {
