@@ -62,7 +62,10 @@ message UpsertBillingAccountRequest {
   string billing_email = 9;
   string billing_phone = 10;
   string country_code = 11;    // ISO 3166-1 alpha-2, default UZ
-  bool is_vat_payer = 12;
+  bool is_vat_payer = 12;      // ignored for tax since 0.97.0 (VAT follows the seller setting)
+  // claude/payer-types-design.md: who pays. INDIVIDUAL needs full_name; LEGAL_ENTITY needs legal_name, tin, legal_address.
+  string customer_type = 13;   // INDIVIDUAL | LEGAL_ENTITY
+  string full_name = 14;       // INDIVIDUAL's name, as it appears on their documents
 }
 
 message BillingAccount {
@@ -79,7 +82,10 @@ message BillingAccount {
   string billing_phone = 11;
   string country_code = 12;
   string currency = 13;
-  bool is_vat_payer = 14;
+  bool is_vat_payer = 14;      // ignored for tax since 0.97.0
+  string customer_type = 15;   // INDIVIDUAL | LEGAL_ENTITY
+  string full_name = 16;
+  string effective_vat_percent = 17;   // the SELLER's VAT rate applied to this org's invoices, e.g. "12" or "0"
 }
 
 // ── InvoiceService messages ─────────────────────────────────────────────────
