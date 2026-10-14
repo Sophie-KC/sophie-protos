@@ -35,6 +35,13 @@ service InvoiceService {
   rpc MarkPaid          (MarkPaidRequest)          returns (Invoice);
   // OPEN or DRAFT only. A PAID invoice must be corrected with a credit note, never voided.
   rpc VoidInvoice        (VoidInvoiceRequest)        returns (Invoice);
+  // Staff action (live PLATFORM_ADMIN, audited CREDIT_NOTE_ISSUED): a full or partial credit against a PAID
+  // invoice — gross amount incl. VAT, capped at the invoice total minus earlier credit notes; VAT split back out
+  // at the invoice's rate; buyer/seller details snapshotted at issue. The invoice stays PAID. Own CN-yyyy-NNNNNN
+  // number and PDF. (Refunds — the money going back — are out of scope for now.)
+  rpc IssueCreditNote    (IssueCreditNoteRequest)    returns (CreditNote);
+  rpc ListCreditNotes    (ListCreditNotesRequest)    returns (ListCreditNotesResponse);
+  rpc RenderCreditNotePdf (RenderCreditNotePdfRequest) returns (InvoicePdf);
 }
 
 // ── BillingAccountService messages ──────────────────────────────────────────
@@ -138,6 +145,40 @@ message MarkPaidRequest {
   string reason = 6;
 }
 
+message IssueCreditNoteRequest {
+  string invoice_id = 1;
+  string amount = 2;              // decimal string, gross (incl. VAT)
+  string reason = 3;              // required
+  string actor_user_id = 4;
+}
+
+message ListCreditNotesRequest {
+  string invoice_id = 1;
+}
+
+message ListCreditNotesResponse {
+  repeated CreditNote credit_notes = 1;   // oldest first
+}
+
+message RenderCreditNotePdfRequest {
+  string credit_note_id = 1;
+}
+
+message CreditNote {
+  string id = 1;
+  string invoice_id = 2;
+  string org_id = 3;
+  string credit_note_number = 4;  // CN-2026-000001, gapless
+  string currency = 5;
+  string subtotal_amount = 6;
+  string tax_amount = 7;
+  string total_amount = 8;
+  string tax_percentage = 9;
+  string reason = 10;
+  string issued_by_user_id = 11;
+  google.protobuf.Timestamp issued_at = 12;
+}
+
 message VoidInvoiceRequest {
   string invoice_id = 1;
   string reason = 2;
@@ -189,9 +230,9 @@ message InvoiceLine {
   optional google.protobuf.Timestamp period_end = 12;
 }
 
-// BillingAdminService: the admin panel's read-only Invoices screen (list + detail core fields
-// only — MarkPaid/VoidInvoice/credit notes/PDF stay customer-facing-only for now, called by
-// api-gateway's BillingController on a real customer's behalf, never by the admin panel). Callers
+// BillingAdminService: the admin panel's Invoices screen reads (list + detail) and billing's audit log.
+// The staff WRITES (MarkPaid, VoidInvoice, IssueCreditNote) live on InvoiceService and are PLATFORM_ADMIN-only
+// there (BillingStaffAuthorization) — they are not customer-facing. Callers
 // are platform staff (a StaffPrincipal, resolved from the isolated sophie-staff realm's JWT — see
 // sophie-common-security's dual-verifier support and subscription-service's own
 // StaffJwtVerifierConfig for the pattern billing-service now mirrors) — every RPC here rejects
@@ -210,6 +251,34 @@ message InvoiceLine {
 service BillingAdminService {
   rpc ListInvoices (ListInvoicesForStaffRequest) returns (ListInvoicesResponse);
   rpc GetInvoiceForStaff (GetInvoiceForStaffRequest) returns (Invoice);
+  // billing-service's own admin_audit_log (INVOICE_MARKED_PAID, INVOICE_VOIDED, CREDIT_NOTE_ISSUED,
+  // INVOICE_MARKED_UNCOLLECTIBLE, ...), newest first; optionally one org's or one invoice's rows.
+  rpc ListBillingAuditLog (ListBillingAuditLogRequest) returns (ListBillingAuditLogResponse);
+}
+
+message ListBillingAuditLogRequest {
+  .org.sophie.common.PageRequest page = 1;
+  optional string org_id = 2;
+  optional string invoice_id = 3;     // target_type INVOICE (and its credit notes)
+}
+
+message ListBillingAuditLogResponse {
+  repeated BillingAuditLogEntry entries = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message BillingAuditLogEntry {
+  string id = 1;
+  string actor_user_id = 2;           // empty for a service actor (e.g. org deletion)
+  string actor = 3;                   // "user:<id>" or "service:<name>"
+  string action = 4;
+  string target_type = 5;
+  optional string target_id = 6;
+  optional string org_id = 7;
+  optional string before_state = 8;   // raw JSON text
+  optional string after_state = 9;
+  optional string reason = 10;
+  google.protobuf.Timestamp created_at = 11;
 }
 
 message ListInvoicesForStaffRequest {

@@ -357,6 +357,9 @@ service OrgService {
   rpc RequestOrgDeletion(RequestOrgDeletionRequest) returns (OrgStatus);
   // Org Admin of that org (checked ignoring its status) or platform staff: undo a pending deletion.
   rpc RestoreOrg(RestoreOrgRequest) returns (OrgStatus);
+  // SERVICE tier: who in the org holds this ORG-scope permission — every active member holding it through a
+  // role, plus every Org Admin (who hold all permissions). For billing notifications: billing.account.manage.
+  rpc ListOrgPermissionHolders(ListOrgPermissionHoldersRequest) returns (ListOrgPermissionHoldersResponse);
 
   // ── Org modules (claude/org-modules-design.md) ─────────────────────────────────────────────────
   // Which of the switchable modules (chat, tasks, docs, calendar, apps) an org has turned on. A module
@@ -1432,6 +1435,15 @@ message RequestOrgDeletionRequest {
 
 message RestoreOrgRequest {
   string org_id = 1;
+}
+
+message ListOrgPermissionHoldersRequest {
+  string org_id = 1;
+  string permission_key = 2;
+}
+
+message ListOrgPermissionHoldersResponse {
+  repeated string user_ids = 1;
 }
 
 message OrgStatus {

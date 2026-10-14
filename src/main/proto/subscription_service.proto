@@ -556,11 +556,9 @@ message CancelScheduledPriceChangeRequest {
 // other read-only admin surface (any ServicePrincipal or StaffPrincipal, no live platform_staff
 // re-check) — there is nothing to write here, so no PLATFORM_ADMIN-only tier applies.
 //
-// This surfaces ONLY what admin_audit_log actually contains today: real rows exist solely for
-// Plans/Pricing writes (platform-wide, org_id always null) — Staff/Subscriptions/Invoices actions
-// have no real audit trail anywhere on the platform yet (org-service and billing-service each lack
-// the writer, even where billing-service already has the identical unmapped table). A future pass
-// wiring those services' own writers would land in their own respective tables, not this one.
+// This surfaces ONLY subscription-service's own admin_audit_log (Plans/Pricing/entitlement overrides,
+// platform-wide). Invoice actions are audited in billing-service's table and read through
+// BillingAdminService.ListBillingAuditLog.
 service AuditAdminService {
   rpc ListAuditLog (ListAuditLogRequest) returns (ListAuditLogResponse);
   rpc GetAuditLogEntry (GetAuditLogEntryRequest) returns (AuditLogEntry);
