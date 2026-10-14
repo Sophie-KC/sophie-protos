@@ -8,6 +8,7 @@ option java_package = "org.sophie.taskservice.grpc";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "common/pagination.proto";
+import "common/export.proto";
 
 // Task Service: projects, an org-wide task-type catalog, and per-project workflow (statuses +
 // transitions). gRPC-only, internal (called behind the Gateway, which forwards the acting user's
@@ -15,6 +16,10 @@ import "common/pagination.proto";
 // scope_type=PROJECT — Task Service never owns its own access model. Boards, labels, and tasks are
 // follow-up steps (their tables are not created yet).
 service TaskService {
+  // Org export (claude/account-deletion-export-design.md §10), SERVICE tier, called by file-service only:
+  // every project with its tasks, comments, activity and attachments.
+  rpc ExportOrg(.org.sophie.common.ExportOrgRequest) returns (stream .org.sophie.common.ExportChunk);
+
   // ── Projects ──
   // Creates the project, grants the creator PROJECT access (AssignScopeRole → "Project Admin"), and
   // seeds a default workflow (To Do / In Progress / Done, permissive transitions).

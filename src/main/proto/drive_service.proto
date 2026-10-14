@@ -7,6 +7,7 @@ option java_package = "org.sophie.driveservice.grpc";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "common/export.proto";
 
 // Drive Service (claude/drive-design.md): a Google-Drive-style file tree — each member's private My Drive
 // plus org/team Shared drives — with folders, trash, sharing and share links. Owns metadata only: every
@@ -22,6 +23,10 @@ import "google/protobuf/empty.proto";
 // roles OWNER | EDITOR | VIEWER. Item.my_role is the caller's EFFECTIVE role normalised to item roles:
 // OWNER (My Drive owner, or MANAGER on a shared drive), EDITOR, VIEWER — plus the fine-grained `caps`.
 service DriveService {
+  // Org export (claude/account-deletion-export-design.md §10), SERVICE tier, called by file-service only:
+  // SHARED drives only: the tree and every file as an attachment.
+  rpc ExportOrg(.org.sophie.common.ExportOrgRequest) returns (stream .org.sophie.common.ExportChunk);
+
   // ── Drives ────────────────────────────────────────────────────────────────────────────────────
   // The caller's My Drive (created on first call) plus every shared drive they're a member of.
   rpc ListDrives(ListDrivesRequest) returns (ListDrivesResponse);

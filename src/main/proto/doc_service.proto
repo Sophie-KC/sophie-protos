@@ -8,6 +8,7 @@ option java_package = "org.sophie.docservice.grpc";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "common/pagination.proto";
+import "common/export.proto";
 
 // Doc Service: Confluence-style spaces + page hierarchy. gRPC-only, internal (called behind the
 // Gateway, which forwards the acting user's internal id as `requested_by`). Space access is resolved
@@ -15,6 +16,10 @@ import "common/pagination.proto";
 // its own access model. This step covers spaces + page hierarchy only; content/versions/drafts/locks/
 // restrictions/comments/task-links are follow-up steps (their tables already exist for FK integrity).
 service DocService {
+  // Org export (claude/account-deletion-export-design.md §10), SERVICE tier, called by file-service only:
+  // every space and page (page.html + page.md from the latest published version) with comments and attachments.
+  rpc ExportOrg(.org.sophie.common.ExportOrgRequest) returns (stream .org.sophie.common.ExportChunk);
+
   // Creates the space and grants the creator SPACE-scope access via Org Service (AssignScopeRole).
   rpc CreateSpace(CreateSpaceRequest) returns (Space);
   rpc GetSpace(GetSpaceRequest) returns (Space);                            // requires space access

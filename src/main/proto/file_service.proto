@@ -14,6 +14,13 @@ import "google/protobuf/empty.proto";
 // user may upload/attach/download before calling. Object bytes never transit this service — clients
 // PUT/GET them directly against MinIO via short-lived presigned URLs.
 service FileService {
+  // Org export jobs (claude/account-deletion-export-design.md §10). USER tier; Org Admin of org_id only.
+  // FAILED_PRECONDITION while another export of the org is QUEUED or RUNNING.
+  rpc StartOrgExport(StartOrgExportRequest) returns (OrgExport);
+  rpc ListOrgExports(ListOrgExportsRequest) returns (ListOrgExportsResponse);
+  // A short-lived presigned GET for a COMPLETED, unexpired export (downloads as sophie-<subdomain>-export-<date>.zip).
+  rpc GetOrgExportDownloadUrl(GetOrgExportDownloadUrlRequest) returns (GetOrgExportDownloadUrlResponse);
+
   // Dedups on (org_id, checksum) against ACTIVE files: on a hit, returns the existing file with
   // already_exists=true and no upload URL (caller skips straight to AttachFileReference). On a miss,
   // creates a PENDING row + a presigned PUT URL.
@@ -265,4 +272,44 @@ message StreamAvatarRequest {
 
 message AvatarChunk {
   bytes data = 1;
+}
+
+// ── Org export (claude/account-deletion-export-design.md §10) ─────────────────────────────────────
+
+message StartOrgExportRequest {
+  string org_id = 1;
+  bool include_files = 2;   // attachments and Drive files; any single file over 10 MB is always left out
+}
+
+message ListOrgExportsRequest {
+  string org_id = 1;
+}
+
+message ListOrgExportsResponse {
+  repeated OrgExport exports = 1;   // newest first, the last 20
+}
+
+message OrgExport {
+  string id = 1;
+  string org_id = 2;
+  string requested_by = 3;
+  bool include_files = 4;
+  string status = 5;                              // QUEUED | RUNNING | COMPLETED | FAILED | EXPIRED
+  string progress_json = 6;                       // {"module": "docs", "modulesDone": 3, "modulesTotal": 6, ...}
+  int64 size_bytes = 7;                           // set when COMPLETED
+  string error = 8;                               // set when FAILED (no internals)
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  google.protobuf.Timestamp expires_at = 11;      // completed_at + 7 days
+  int32 skipped_files = 12;                       // files listed in manifest.json but not in the ZIP
+}
+
+message GetOrgExportDownloadUrlRequest {
+  string org_id = 1;
+  string export_id = 2;
+}
+
+message GetOrgExportDownloadUrlResponse {
+  string url = 1;
+  google.protobuf.Timestamp expires_at = 2;
 }

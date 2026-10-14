@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package org.sophie.common;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.common.grpc";
+
+// Org export (claude/account-deletion-export-design.md §10). file-service builds the ZIP; every module streams
+// its own part through one SERVICE-tier RPC on its own service:
+//   rpc ExportOrg(org.sophie.common.ExportOrgRequest) returns (stream org.sophie.common.ExportChunk);
+
+message ExportOrgRequest {
+  string org_id = 1;
+  string export_id = 2;   // for logs only
+}
+
+// One piece of the module's part of the ZIP. Exactly one of the two shapes:
+// - content: `path` + `data`. Consecutive chunks with the same path append to one ZIP entry; a module finishes a
+//   path before starting the next. data ≤ 1 MiB per chunk.
+// - attachment: `path` + `file_id` (data empty). file-service copies that file's bytes into the ZIP itself,
+//   applying the export's include_files choice and the 10 MB limit (skips are listed in manifest.json).
+// Paths are relative to the module's own folder (file-service prefixes "tasks/", "docs/", ...), use "/" and must
+// not start with "/" or contain "..".
+message ExportChunk {
+  string path = 1;
+  bytes data = 2;
+  string file_id = 3;
+}

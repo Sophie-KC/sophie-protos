@@ -7,6 +7,7 @@ option java_package = "org.sophie.calendarservice.grpc";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "common/export.proto";
 
 // Calendar: events, recurrence, attendees, reminders, free/busy. Central Asia region only — no DST in
 // any covered country, so there is no gap/fold handling anywhere in this model. There is no Calendar
@@ -16,6 +17,10 @@ import "google/protobuf/empty.proto";
 // requests that need org scoping, since a user may belong to more than one org and the security
 // context carries no org claim.
 service CalendarService {
+  // Org export (claude/account-deletion-export-design.md §10), SERVICE tier, called by file-service only:
+  // org events with attendees (PRIVATE events reduced to time + organizer).
+  rpc ExportOrg(.org.sophie.common.ExportOrgRequest) returns (stream .org.sophie.common.ExportChunk);
+
   rpc GetSettings         (GetSettingsRequest)         returns (SettingsView);
   rpc UpdateUserSettings  (UpdateUserSettingsRequest)  returns (SettingsView);
   rpc UpdateOrgSettings   (UpdateOrgSettingsRequest)   returns (SettingsView);

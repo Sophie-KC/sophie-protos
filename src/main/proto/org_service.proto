@@ -8,8 +8,13 @@ option java_package = "org.sophie.orgservice.grpc";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "common/pagination.proto";
+import "common/export.proto";
 
 service OrgService {
+  // Org export (claude/account-deletion-export-design.md §10), SERVICE tier, called by file-service only:
+  // org.json, members.json, roles.json, apps.json.
+  rpc ExportOrg(.org.sophie.common.ExportOrgRequest) returns (stream .org.sophie.common.ExportChunk);
+
   rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
   rpc CreateOrganization(CreateOrganizationRequest) returns (Organization);
   rpc GetOrganization(GetOrganizationRequest) returns (Organization);
