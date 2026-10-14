@@ -248,6 +248,55 @@ message InvoiceLine {
 // org-service's DB, not this service's) — a deactivated staff member's still-unexpired JWT could
 // read invoice data until it naturally expires. Read-only, low-severity, and a known, accepted gap
 // for this pass, same as SubscriptionAdminService's.
+// Card payments through Payme and Click (claude/payments-payme-click-design.md).
+service BillingPaymentService {
+  // USER tier; the caller needs billing.account.manage in org_id. The invoice must be the org's and OPEN; the
+  // full outstanding amount is charged. FAILED_PRECONDITION when the provider isn't configured or the invoice
+  // already has a payment in flight.
+  rpc StartCheckout (StartCheckoutRequest) returns (StartCheckoutResponse);
+  // Which providers are configured (for the billing page). USER tier, any member of org_id.
+  rpc ListPaymentProviders (ListPaymentProvidersRequest) returns (ListPaymentProvidersResponse);
+  // SERVICE tier, api-gateway only: the provider's raw server-to-server callback, passed through unchanged; the
+  // response body is returned to the provider as-is (protocol errors are inside it, never a gRPC error).
+  rpc HandlePaymeRequest (HandlePaymeRequestRequest) returns (ProviderCallbackResponse);
+  rpc HandleClickRequest (HandleClickRequestRequest) returns (ProviderCallbackResponse);
+}
+
+message StartCheckoutRequest {
+  string org_id = 1;
+  string invoice_id = 2;
+  string provider = 3;      // PAYME | CLICK
+  string return_url = 4;    // where the provider sends the payer back
+  string locale = 5;        // ru | uz | en
+}
+
+message StartCheckoutResponse {
+  string redirect_url = 1;
+}
+
+message ListPaymentProvidersRequest {
+  string org_id = 1;
+}
+
+message ListPaymentProvidersResponse {
+  repeated string providers = 1;   // PAYME, CLICK — only those configured
+}
+
+message HandlePaymeRequestRequest {
+  string authorization_header = 1;   // as received (Basic …), verified by billing-service
+  bytes body = 2;                    // the JSON-RPC request
+}
+
+message HandleClickRequestRequest {
+  int32 action = 1;                  // 0 prepare, 1 complete (from the URL the provider called)
+  map<string, string> fields = 2;    // the form fields as received
+}
+
+message ProviderCallbackResponse {
+  bytes body = 1;                    // JSON
+  int32 http_status = 2;             // 200 for every protocol answer
+}
+
 service BillingAdminService {
   rpc ListInvoices (ListInvoicesForStaffRequest) returns (ListInvoicesResponse);
   rpc GetInvoiceForStaff (GetInvoiceForStaffRequest) returns (Invoice);
