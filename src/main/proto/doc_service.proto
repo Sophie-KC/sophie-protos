@@ -28,12 +28,17 @@ service DocService {
   rpc UpdateSpace(UpdateSpaceRequest) returns (Space);                      // partial: name/description/icon
   rpc RestoreSpace(RestoreSpaceRequest) returns (Space);                    // un-archive + reverse page cascade
   rpc SetSpaceHomepage(SetSpaceHomepageRequest) returns (Space);            // page_id must belong to space; empty clears
+  // The Tasks project this space's pages belong to by default (optional). Space managers only.
+  rpc SetSpaceProject(SetSpaceProjectRequest) returns (Space);              // empty project_id clears
 
   rpc CreatePage(CreatePageRequest) returns (Page);                         // requires space access
   rpc GetPage(GetPageRequest) returns (Page);
   rpc ListPagesInSpace(ListPagesInSpaceRequest) returns (ListPagesInSpaceResponse); // full tree, flat
   rpc MovePage(MovePageRequest) returns (Page);                             // re-parent and/or reorder
   rpc RenamePage(RenamePageRequest) returns (Page);                         // title metadata only, no new version
+  // Connects a page — and so every descendant without its own link — to a Tasks project, overriding
+  // the space's. Same access as RenamePage.
+  rpc SetPageProject(SetPageProjectRequest) returns (Page);                 // empty project_id clears
   rpc DeletePage(DeletePageRequest) returns (google.protobuf.Empty);        // soft-delete + descendants
   // Doc-scoped attachment download URL (embedded images and file-card attachments). Validates page
   // access, then requires the file_id resolve to either a live page_attachment (shelf) row or a
@@ -207,6 +212,9 @@ message Space {
   google.protobuf.Timestamp deleted_at = 10; // absent = active; present = archived
   bool can_manage = 11;                  // may the requesting user manage this space (creator or space admin)
   string avatar_version = 12;            // empty = no image avatar; frontend falls back to icon, then monogram
+  // A Task Service project id; absent = not connected. Not validated against Task Service after it was
+  // set — a project deleted later leaves a dangling id that readers treat as "not connected".
+  optional string project_id = 13;
 }
 
 // What a page's body actually is. Fixed at creation and never converted — the two kinds have
@@ -234,6 +242,9 @@ message Page {
   bool has_restrictions = 10;
   // UNSPECIFIED is read as RICH_TEXT everywhere, so every pre-0.60.0 row and client keeps working.
   PageKind kind = 11;
+  // This page's OWN project link; absent = inherits (nearest ancestor with one, else the space's).
+  // Inheritance is resolved by the reader from the page tree, never stored on descendants.
+  optional string project_id = 12;
 }
 
 // ===================== Spaces =====================
@@ -285,6 +296,20 @@ message RestoreSpaceRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string space_id = 2;
+}
+
+// project_org_id: the org the project belongs to, as the caller (the gateway) read it from Task
+// Service while checking the user can see the project. Doc Service rejects a project from another org.
+message SetSpaceProjectRequest {
+  string space_id = 1;
+  string project_id = 2;     // empty = disconnect
+  string project_org_id = 3; // required when project_id is set
+}
+
+message SetPageProjectRequest {
+  string page_id = 1;
+  string project_id = 2;     // empty = clear this page's own link (it inherits again)
+  string project_org_id = 3; // required when project_id is set
 }
 
 message SetSpaceHomepageRequest {
