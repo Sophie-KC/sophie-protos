@@ -164,6 +164,18 @@ service ChatService {
   // every other staff count RPC added alongside this one; revisit with a maintained counter if
   // this ever becomes a hot path (chat is this platform's highest-volume table).
   rpc GetMessageCountForStaff(GetMessageCountForStaffRequest) returns (GetMessageCountForStaffResponse);
+
+  // ── Import (claude/slack-import-design.md §9) ──
+  // SERVICE tier, called only by import-service, which has already checked that imported_by is an Org
+  // Admin of org_id. Same contract as task-service's and doc-service's Import* RPCs: caller-chosen ids,
+  // insert-if-absent (a resent batch reports existing_ids and changes nothing), one transaction per call,
+  // create-only. No notifications, no live events per message; search outbox rows go in the bulk lane.
+  rpc ImportConversation(ImportConversationRequest) returns (Conversation);
+  rpc ImportMessages(ImportMessagesRequest) returns (ImportBatchResponse);
+  rpc ImportPins(ImportPinsRequest) returns (ImportBatchResponse);
+  // Thread-root flags, last message / activity, every member's read state at the newest message, one
+  // live "added" event per member. Safe to call more than once.
+  rpc FinishConversationImport(FinishConversationImportRequest) returns (Conversation);
 }
 
 message UpdateChannelDescriptionRequest {
@@ -335,6 +347,10 @@ message Message {
   // response came from the original insert or an idempotent replay). Absent for messages sent before
   // this field existed, or without one supplied.
   optional string client_message_id = 16;
+  // Set only on imported messages whose author has no account here (claude/slack-import-design.md §8):
+  // the name to show instead of sender_id's, which is then the admin who ran the import. Display only;
+  // such a message cannot be edited.
+  optional string imported_author_name = 17;
 }
 
 message MessageReaction {
@@ -643,4 +659,82 @@ message AddMemberToOrgChannelsRequest {
   string org_id = 1;
   string user_id = 2;
   repeated string conversation_ids = 3;
+}
+
+// ===================== Import (import-service only) =====================
+
+// Which of the request's ids this call created, and which already existed (a resent batch).
+message ImportBatchResponse {
+  repeated string created_ids = 1;
+  repeated string existing_ids = 2;
+}
+
+// A CHANNEL (DIRECT is not importable). imported_by becomes its OWNER and gets the CHANNEL scope role,
+// exactly as CreateGroupChannel does; every other member must be an org member (pending invites count).
+message ImportConversationRequest {
+  string id = 1;
+  string org_id = 2;
+  string imported_by = 3;
+  string name = 4;
+  string description = 5;                   // optional
+  google.protobuf.Timestamp created_at = 6;  // absent = now
+  repeated ImportConversationMember members = 7; // imported_by is added as OWNER whether listed or not
+}
+
+message ImportConversationMember {
+  string user_id = 1;
+  string role = 2;                           // ADMIN or MEMBER; empty = MEMBER
+}
+
+// Up to 200 messages of one conversation. A thread reply's root must already exist or come EARLIER in
+// this batch. Every user id (sender, mentions, reactions) must be a member of the conversation.
+message ImportMessagesRequest {
+  string org_id = 1;
+  string conversation_id = 2;
+  string imported_by = 3;
+  repeated ImportMessage messages = 4;
+}
+
+message ImportMessage {
+  string id = 1;
+  string sender_id = 2;                      // empty = imported_by
+  optional string imported_author_name = 3;  // see Message.imported_author_name; at most 255 characters
+  string content = 4;                        // TipTap JSON ({"type":"doc",...})
+  optional string thread_root_message_id = 5;
+  google.protobuf.Timestamp created_at = 6;  // required
+  optional google.protobuf.Timestamp edited_at = 7;
+  optional google.protobuf.Timestamp deleted_at = 8;
+  repeated string mentioned_user_ids = 9;
+  repeated ImportAttachment attachments = 10;
+  repeated ImportReaction reactions = 11;
+}
+
+message ImportAttachment {
+  string id = 1;
+  string file_id = 2;                        // a confirmed, ACTIVE File Service file of this org
+  string file_name = 3;
+}
+
+message ImportReaction {
+  string user_id = 1;
+  string emoji = 2;                          // at most 20 characters
+  google.protobuf.Timestamp created_at = 3;  // absent = the message's created_at
+}
+
+// Up to 500 pins of one conversation; each message must belong to it. Ids are "<message_id>".
+message ImportPinsRequest {
+  string org_id = 1;
+  string conversation_id = 2;
+  repeated ImportPin pins = 3;
+}
+
+message ImportPin {
+  string message_id = 1;
+  string pinned_by = 2;                      // must be a member of the conversation
+  google.protobuf.Timestamp pinned_at = 3;   // absent = now
+}
+
+message FinishConversationImportRequest {
+  string org_id = 1;
+  string conversation_id = 2;
 }
