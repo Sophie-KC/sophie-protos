@@ -180,6 +180,9 @@ message TelegramDeliverEvent {
   string preview_source = 8;                  // plain text; may be empty (then no preview, Open only)
   string deep_link = 9;                       // app path, e.g. "/chat/<id>?msg=<id>"; host added by telegram-service
   map<string, string> extra = 10;             // type-specific: startsAt, location, projectKey, taskNumber, ...
+  // The recipient's language in this org (org-service locale.language, preferences-design §11 Q3).
+  // "" = an older notification-service: fall back to the link's own locale.
+  string locale = 11;
 }
 
 message TelegramActor {

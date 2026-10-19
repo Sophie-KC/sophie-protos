@@ -42,6 +42,13 @@ service NotificationService {
   // Removes a push token (best-effort logout cleanup). Token-scoped, not caller-scoped: a token is a
   // device-held secret, and dropping one that's already gone is a harmless no-op.
   rpc UnregisterPushToken(UnregisterPushTokenRequest) returns (google.protobuf.Empty);
+
+  // Caller-scoped notification preferences (claude/preferences-design.md §11). Per-type switches are per
+  // person — the same in every org; the only per-device switch is push on that device in that org.
+  // The response carries the type catalogue (groups, defaults, locked types) so clients render it as-is.
+  rpc GetMyNotificationPrefs(GetMyNotificationPrefsRequest) returns (NotificationPrefs);
+  // Unknown types → INVALID_ARGUMENT; switching a locked type's `enabled` off is refused the same way.
+  rpc UpdateMyNotificationPrefs(UpdateMyNotificationPrefsRequest) returns (NotificationPrefs);
 }
 
 message Notification {
@@ -99,6 +106,44 @@ message GetUnreadCountResponse {
 message RegisterPushTokenRequest {
   string token = 1;
   string platform = 2; // WEB now; ANDROID/IOS reserved
+  // org-service device this token belongs to (preferences-design §10.2); "" = unknown device, which
+  // gets no per-device switch and is written in the person's org-level language.
+  string device_id = 3;
+}
+
+// ===================== Notification preferences =====================
+
+message NotificationTypePref {
+  string type = 1;                   // e.g. "chat.mention"
+  string group = 2;                  // chat | tasks | calendar | drive | billing
+  bool enabled = 3;                  // "Notify me": off = not stored, no push, no Telegram
+  bool push = 4;
+  bool enabled_default = 5;
+  bool push_default = 6;
+  bool locked = 7;                   // `enabled` cannot be switched off
+}
+
+message NotificationPrefs {
+  repeated NotificationTypePref types = 1;
+  bool device_push_enabled = 2;      // for the request's device in the request's org (true when unset)
+}
+
+message GetMyNotificationPrefsRequest {
+  string org_id = 1;
+  string device_id = 2;
+}
+
+message NotificationTypePrefUpdate {
+  optional bool enabled = 1;
+  optional bool push = 2;
+  bool reset = 3;                    // drop the caller's values: back to the type's defaults
+}
+
+message UpdateMyNotificationPrefsRequest {
+  string org_id = 1;
+  string device_id = 2;
+  map<string, NotificationTypePrefUpdate> types = 3;
+  optional bool device_push_enabled = 4;   // needs device_id
 }
 
 message UnregisterPushTokenRequest {

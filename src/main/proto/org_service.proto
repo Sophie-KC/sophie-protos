@@ -270,6 +270,27 @@ service OrgService {
   // Called fire-and-forget by api-gateway when it mints a WebSocket ticket carrying a device id.
   rpc TouchDevice(TouchDeviceRequest) returns (google.protobuf.Empty);
 
+  // ── Preferences (claude/preferences-design.md §10–11) ────────────────────────────────────────────
+  // A preference key (registry in org-service; e.g. appearance.theme, locale.language) resolves through
+  // layers, most specific first: DEVICE (this device in this org) > MEMBER (this org) > USER (all the
+  // caller's orgs) > ORG_DEFAULT (set by an admin, only for org-defaultable keys) > PLATFORM. Identity is
+  // the gRPC principal; org_id must be an org the caller is an active member of; device_id, when set,
+  // must be a live device the caller owns — otherwise the DEVICE layer is ignored on reads and refused on
+  // writes. Values travel as JSON text, validated against the key's registry entry.
+  rpc GetMyPreferences(GetMyPreferencesRequest) returns (MyPreferences);
+  // Writes one layer (USER, MEMBER or DEVICE), all keys or none (any invalid key/value → INVALID_ARGUMENT).
+  rpc SetMyPreferences(SetMyPreferencesRequest) returns (MyPreferences);
+  // Deletes the caller's values at one layer, so those keys fall through to the next layer.
+  rpc ResetMyPreferences(ResetMyPreferencesRequest) returns (MyPreferences);
+  // Org defaults: any active member may read; writing needs org.manage_settings (as the org logo does).
+  rpc GetOrgPreferenceDefaults(GetOrgPreferenceDefaultsRequest) returns (OrgPreferenceDefaults);
+  rpc SetOrgPreferenceDefaults(SetOrgPreferenceDefaultsRequest) returns (OrgPreferenceDefaults);
+  // Trusted-internal (SERVICE tier, like BatchGetUsers): a backend asks what a user's keys resolve to in
+  // an org — once without the device layer, and once per listed device. notification-service uses it to
+  // write push and Telegram texts in the recipient's language. Unknown/foreign devices get the
+  // device-less values.
+  rpc ResolveUserPreferences(ResolveUserPreferencesRequest) returns (ResolveUserPreferencesResponse);
+
   // ── Onboarding (claude/onboarding-verification.md; design onboarding-module-design.md) ─────────
   // Identity is always the gRPC principal (SophieSecurityContext.currentInternalUserId()), never a
   // request field. org_id is always checked against the caller's own ACTIVE-or-pending membership.
@@ -1211,6 +1232,87 @@ message RevokeDeviceRequest {
 
 message TouchDeviceRequest {
   string device_id = 1;
+}
+
+// ===================== Preferences =====================
+
+enum PreferenceLayer {
+  PREFERENCE_LAYER_UNSPECIFIED = 0;
+  PREFERENCE_LAYER_PLATFORM = 1;     // the registry's built-in default
+  PREFERENCE_LAYER_ORG_DEFAULT = 2;  // an admin's default for this org
+  PREFERENCE_LAYER_USER = 3;         // the caller, in all their orgs
+  PREFERENCE_LAYER_MEMBER = 4;       // the caller, in this org
+  PREFERENCE_LAYER_DEVICE = 5;       // the caller, on this device, in this org
+}
+
+message PreferenceLayerValue {
+  PreferenceLayer layer = 1;
+  string value_json = 2;
+}
+
+message PreferenceEntry {
+  string key = 1;
+  string value_json = 2;             // the resolved value
+  PreferenceLayer source = 3;        // which layer it came from
+  // Every layer that holds a value for this key, most specific first (PLATFORM always last) — what the
+  // UI shows as "Reset" targets without asking again.
+  repeated PreferenceLayerValue layers = 4;
+  bool org_defaultable = 5;
+}
+
+message GetMyPreferencesRequest {
+  string org_id = 1;
+  string device_id = 2;              // "" = no device layer
+}
+
+message MyPreferences {
+  repeated PreferenceEntry entries = 1;
+  bool device_known = 2;             // device_id named a live device of the caller's
+}
+
+message SetMyPreferencesRequest {
+  string org_id = 1;
+  string device_id = 2;              // required when layer = DEVICE
+  PreferenceLayer layer = 3;         // USER | MEMBER | DEVICE
+  map<string, string> values_json = 4;
+}
+
+message ResetMyPreferencesRequest {
+  string org_id = 1;
+  string device_id = 2;
+  PreferenceLayer layer = 3;         // USER | MEMBER | DEVICE
+  repeated string keys = 4;
+}
+
+message GetOrgPreferenceDefaultsRequest {
+  string org_id = 1;
+}
+
+message OrgPreferenceDefaults {
+  map<string, string> values_json = 1;
+}
+
+message SetOrgPreferenceDefaultsRequest {
+  string org_id = 1;
+  map<string, string> values_json = 2;   // only org-defaultable keys
+  repeated string reset_keys = 3;        // removed, falling back to PLATFORM
+}
+
+message ResolveUserPreferencesRequest {
+  string user_id = 1;
+  string org_id = 2;
+  repeated string keys = 3;
+  repeated string device_ids = 4;
+}
+
+message ResolveUserPreferencesResponse {
+  map<string, string> values_json = 1;         // without the device layer
+  repeated DevicePreferenceValues devices = 2; // one per requested device_id, in request order
+}
+
+message DevicePreferenceValues {
+  string device_id = 1;
+  map<string, string> values_json = 2;
 }
 
 // ── Onboarding ───────────────────────────────────────────────────────────────────────────────────
