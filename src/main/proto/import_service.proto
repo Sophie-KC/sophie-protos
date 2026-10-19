@@ -8,7 +8,7 @@ option java_package = "org.sophie.importservice.grpc";
 import "google/protobuf/timestamp.proto";
 
 // Import Service: one-time imports of Jira and Confluence into Tasks and Docs
-// (claude/atlassian-import-design.md). The Gateway calls these on behalf of a signed-in Org Admin; every
+// (claude/atlassian-import-design.md), and of Slack channels into Chat (claude/slack-import-design.md). The Gateway calls these on behalf of a signed-in Org Admin; every
 // RPC takes the org_id it acts in and refuses anyone who is not that org's admin. The long work runs in
 // import-service's own background worker, which writes through task-service's and doc-service's Import*
 // RPCs. The Atlassian credential is accepted once, stored encrypted, never returned, and wiped when the
@@ -36,10 +36,10 @@ service ImportService {
 message CreateImportJobRequest {
   string org_id = 1;
   string source = 2;               // CLOUD (DATA_CENTER arrives in Phase 3)
-  string base_url = 3;             // https://<site>.atlassian.net
-  string email = 4;                // the Atlassian account the API token belongs to
-  string api_token = 5;            // never returned, never logged
-  repeated string products = 6;    // JIRA and/or CONFLUENCE
+  string base_url = 3;             // https://<site>.atlassian.net; empty for SLACK (the token names its workspace)
+  string email = 4;                // the Atlassian account the API token belongs to; empty for SLACK
+  string api_token = 5;            // never returned, never logged; for SLACK the app's User OAuth Token (xoxp-…)
+  repeated string products = 6;    // JIRA and/or CONFLUENCE, or SLACK alone
 }
 
 message GetImportJobRequest {
@@ -87,6 +87,25 @@ message ImportDiscovery {
   int32 visible_projects = 6;      // what this token can see …
   int32 total_projects = 7;        // … against what the site has; a gap means the token is not an admin's
   repeated DiscoveredSpace spaces = 8; // Confluence (Phase 2, §23); attachment_bytes above includes theirs
+  // Slack (slack-import-design.md §6.1); attachment_bytes above is their files' total.
+  repeated DiscoveredChannel channels = 9;
+  int64 messages = 10;             // main-feed messages in every visible channel
+  int64 threads = 11;              // messages with replies: one Slack call each, which sets the duration
+  int32 estimated_minutes = 12;    // for the selected channels, at Slack's documented rate (§3.5)
+}
+
+message DiscoveredChannel {
+  string slack_id = 1;
+  string name = 2;
+  bool is_private = 3;
+  bool archived = 4;
+  int32 member_count = 5;
+  int32 message_count = 6;
+  int32 thread_count = 7;
+  int32 reply_count = 8;
+  int32 file_count = 9;
+  int64 file_bytes = 10;
+  google.protobuf.Timestamp oldest_message_at = 11; // absent when the channel is empty
 }
 
 message DiscoveredSpace {
@@ -112,6 +131,7 @@ message DiscoveredProject {
 message ImportCounter {
   // PROJECT | ISSUE | COMMENT | ATTACHMENT | SPRINT | FIELD | PERSON
   // | SPACE | PAGE | PAGE_COMMENT | PAGE_ATTACHMENT (Confluence)
+  // | CHANNEL | MESSAGE | THREAD | FILE | PIN | REACTION (Slack)
   string kind = 1;
   int32 total = 2;
   int32 done = 3;
@@ -140,6 +160,24 @@ message ImportMapping {
   ImportOptions options = 5;
   int32 version = 6;               // send it back on update; a stale version is refused (two tabs)
   repeated SpaceChoice spaces = 7;
+  repeated ChannelChoice channels = 8;
+}
+
+// A Slack channel and what becomes of it (slack-import-design.md §7). Archived channels start unselected.
+message ChannelChoice {
+  string slack_id = 1;
+  string name = 2;
+  bool selected = 3;
+  bool is_private = 4;
+  bool archived = 5;
+  bool is_general = 6;             // the workspace's #general: membership defaults to EVERYONE
+  bool shared = 7;                 // Slack Connect: people from other organisations post here
+  int32 member_count = 8;
+  int32 message_count = 9;
+  int32 thread_count = 10;
+  // SLACK_MEMBERS (its Slack members who have an account here) | EVERYONE (every mapped person; public only)
+  string membership = 11;
+  bool existing_channel = 12;      // an earlier import of this workspace made it: added to
 }
 
 message ProjectChoice {
@@ -170,7 +208,7 @@ message SpaceChoice {
 }
 
 message PersonChoice {
-  string account_id = 1;           // Atlassian accountId
+  string account_id = 1;           // Atlassian accountId, or Slack user id (U…/W…; bots are bot:<id>)
   string display_name = 2;
   string email = 3;                // empty when Atlassian hides it and no CSV supplied it
   bool active = 4;                 // false = deactivated in Atlassian; defaults to ATTRIBUTE
@@ -217,6 +255,7 @@ message UpdateImportMappingRequest {
   repeated ValueChoice values = 6;
   optional ImportOptions options = 7;
   repeated SpaceChoice spaces = 8;
+  repeated ChannelChoice channels = 9; // matched by slack_id; selected and membership are read
 }
 
 message ApplyPeopleCsvRequest {
