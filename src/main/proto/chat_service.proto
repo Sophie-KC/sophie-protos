@@ -269,6 +269,7 @@ message MessagePreview {
   google.protobuf.Timestamp created_at = 6;
   bool deleted = 7;
   bool seen = 8;                          // meaningful only when sender_id == caller (✓ vs ✓✓)
+  optional string imported_author_name = 9; // see Message.imported_author_name; seen is then always false
 }
 
 message CreateGroupChannelRequest {
