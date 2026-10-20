@@ -49,6 +49,20 @@ service NotificationService {
   rpc GetMyNotificationPrefs(GetMyNotificationPrefsRequest) returns (NotificationPrefs);
   // Unknown types → INVALID_ARGUMENT; switching a locked type's `enabled` off is refused the same way.
   rpc UpdateMyNotificationPrefs(UpdateMyNotificationPrefsRequest) returns (NotificationPrefs);
+
+  // Internal only (ServicePrincipal): which of user_ids would receive a notification of `type` — the type's
+  // effective "Notify me" switch for each. For producers of opt-in types (Task Service's weekly digest and
+  // time reminder) to skip the work for everyone who hasn't opted in. Unknown types → INVALID_ARGUMENT.
+  rpc FilterRecipientsByPreference(FilterRecipientsByPreferenceRequest) returns (FilterRecipientsByPreferenceResponse);
+}
+
+message FilterRecipientsByPreferenceRequest {
+  string type = 1;
+  repeated string user_ids = 2;   // at most 1000
+}
+
+message FilterRecipientsByPreferenceResponse {
+  repeated string user_ids = 1;   // the subset with the type switched on, in request order
 }
 
 message Notification {

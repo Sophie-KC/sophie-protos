@@ -1396,6 +1396,12 @@ message ListMyOpenTasksResponse {
 //   task.commented  — to the assignee and the reporter on a new comment (never the author, never
 //                     someone already notified task.mentioned for the same comment)
 //   task.due_soon   — to the assignee, once, when an open task's due date is tomorrow (UTC)
+//   task.weekly_digest — opt-in (off by default): Monday morning, last week's numbers for the projects the
+//                     recipient is a member of (claude/dashboards-design.md §12). Payload WeeklyDigestPayload,
+//                     source reference WeeklyDigestSourceReference.
+//   task.time_reminder — opt-in (off by default): a working day's evening, to someone with open work in a
+//                     time-tracking project who has logged nothing that day and has no timer running.
+//                     Payload TimeReminderPayload, source reference WeeklyDigestSourceReference (org only).
 // None is sent to the actor themself.
 
 message TaskNotificationSourceReference {
@@ -1412,6 +1418,46 @@ message TaskNotificationPayload {
   string project_name = 5;
   string content_preview = 6;                 // comment text, plain, max 200 chars (comment types only)
   string due_date = 7;                        // ISO yyyy-MM-dd (task.due_soon only)
+}
+
+message WeeklyDigestSourceReference {
+  string org_id = 1;
+  string week_start = 2;                      // ISO yyyy-MM-dd, a Monday (empty for task.time_reminder)
+}
+
+// Numbers only — names of people are never in it (clients resolve ids, and per-person numbers stay on the
+// dashboards, behind D7). "Team" = every project in the digest, i.e. the recipient's own projects.
+message WeeklyDigestPayload {
+  string week_start = 1;                      // ISO yyyy-MM-dd, Monday
+  string week_end = 2;                        // ISO yyyy-MM-dd, Sunday
+  string time_zone = 3;                       // the zone the week was cut in
+  int32 completed = 4;                        // finished last week, credited to the recipient
+  int32 completed_points = 5;
+  int32 team_completed = 6;                   // finished last week in the recipient's projects
+  int32 team_completed_prev = 7;              // ... and the week before, for the trend
+  int32 team_created = 8;
+  int32 team_overdue = 9;                     // open and past due now
+  int32 open_assigned = 10;                   // open work assigned to the recipient now
+  int32 logged_minutes = 11;                  // the recipient's time logged last week (time-tracking projects)
+  int32 attention = 12;                       // projects whose health flag is AMBER or RED
+  int32 project_count = 13;
+  bool manager = 14;                          // may see per-person numbers in every project of the digest
+  repeated WeeklyDigestProject projects = 15; // worst health first, at most 5
+}
+
+message WeeklyDigestProject {
+  string project_id = 1;
+  string key = 2;
+  string name = 3;
+  int32 completed = 4;
+  int32 overdue = 5;
+  string health = 6;                          // GREEN | AMBER | RED | NA
+}
+
+message TimeReminderPayload {
+  string date = 1;                            // ISO yyyy-MM-dd in the reminder's zone
+  int32 open_tasks = 2;                       // open tasks assigned to the recipient in time-tracking projects
+  string project_name = 3;                    // one of them, for the text
 }
 
 // ── Project templates + features ──
