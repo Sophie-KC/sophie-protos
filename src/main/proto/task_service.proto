@@ -205,6 +205,21 @@ service TaskService {
   rpc GetSprintBurndown(GetSprintBurndownRequest) returns (SprintBurndown);                   // project member
   rpc ListSprintVelocity(ListSprintVelocityRequest) returns (ListSprintVelocityResponse);     // project member
 
+  // ── Dashboards: metrics, metric settings, health (claude/dashboards-design.md §10) ──
+  // Results and settings travel as JSON documents owned by task-service (the metric catalogue's shapes
+  // and the validated settings document); the gateway passes them through untouched. Every metric is
+  // scoped to the requested ∩ the caller's accessible projects — no admin bypass — and per-person
+  // numbers follow the analytics.view_people rules.
+  rpc RunMetric(RunMetricRequest) returns (MetricJson);                                        // org member
+  rpc DrillDownMetric(DrillDownMetricRequest) returns (MetricJson);                            // org member
+  rpc GetProjectAnalyticsSettings(GetProjectAnalyticsSettingsRequest) returns (ProjectAnalyticsSettings);    // project member
+  rpc UpdateProjectAnalyticsSettings(UpdateProjectAnalyticsSettingsRequest) returns (ProjectAnalyticsSettings); // project manager
+  rpc ResetProjectAnalyticsSettings(ResetProjectAnalyticsSettingsRequest) returns (ProjectAnalyticsSettings);   // project manager
+  rpc PreviewProjectHealth(PreviewProjectHealthRequest) returns (MetricJson);                  // project member
+  rpc GetOrgAnalyticsDefaults(GetOrgAnalyticsDefaultsRequest) returns (OrgAnalyticsDefaults);  // org member
+  rpc UpdateOrgAnalyticsDefaults(UpdateOrgAnalyticsDefaultsRequest) returns (OrgAnalyticsDefaults); // org admin
+  rpc ListMetricPresets(ListMetricPresetsRequest) returns (MetricJson);                        // org member
+
   // ── Archive (Trello-style: off every view, nothing deleted; restorable) ──
   rpc SetTaskArchived(SetTaskArchivedRequest) returns (Task);                                  // project member
   rpc ArchiveTasksInStatus(ArchiveTasksInStatusRequest) returns (ArchiveTasksInStatusResponse); // project member
@@ -1458,6 +1473,85 @@ message SprintVelocity {
 
 message ListSprintVelocityResponse {
   repeated SprintVelocity sprints = 1; // oldest → newest, for charting
+}
+
+// ── Dashboards (claude/dashboards-design.md §10) ──
+
+// One metric query. Empty project_ids = every project the caller can access; a listed project the caller
+// can't access is left out and only counted (hiddenProjectCount in the result).
+message RunMetricRequest {
+  string org_id = 1;
+  string metric = 2;                 // catalogue key: throughput, cycle_time, cfd, project_health, ...
+  repeated string project_ids = 3;
+  repeated string people = 4;        // user ids; others than the caller need analytics.view_people
+  repeated string type_ids = 5;
+  repeated string label_ids = 6;
+  string from = 7;                   // ISO yyyy-MM-dd, inclusive; empty = 30 days before `to`
+  string to = 8;                     // ISO yyyy-MM-dd, inclusive; empty = today
+  string time_zone = 9;              // IANA zone days are cut in; empty = UTC
+  string bucket = 10;                // DAY | WEEK | MONTH; empty = the metric's default
+  string group_by = 11;              // NONE | PROJECT | PERSON | TYPE | STATUS | PRIORITY; empty = default
+  map<string, string> params = 12;   // metric-specific, e.g. unit=POINTS, last=7
+}
+
+// The tasks behind one mark of a chart. selector: bucket (a bucket's first day), group (a group key),
+// series (created | completed), status (a status id), minDays / maxDays.
+message DrillDownMetricRequest {
+  RunMetricRequest query = 1;
+  map<string, string> selector = 2;
+}
+
+// A JSON document from task-service: a metric envelope {metric, from, to, timeZone, projectIds,
+// hiddenProjectCount, peopleVisible, notices[], body{kind, ...}}, a health evaluation, or the preset list.
+message MetricJson {
+  string json = 1;
+}
+
+message GetProjectAnalyticsSettingsRequest {
+  string project_id = 1;
+}
+
+message UpdateProjectAnalyticsSettingsRequest {
+  string project_id = 1;
+  string settings_json = 2;          // the full document; validated strictly (unknown keys refused)
+}
+
+message ResetProjectAnalyticsSettingsRequest {
+  string project_id = 1;
+}
+
+message ProjectAnalyticsSettings {
+  string project_id = 1;
+  string settings_json = 2;          // the project's document, or its preset + org default when own_row = false
+  bool own_row = 3;
+  int32 version = 4;
+  bool can_edit = 5;
+}
+
+message PreviewProjectHealthRequest {
+  string project_id = 1;
+  string settings_json = 2;          // a draft document; validated as a save would be, nothing stored
+  string time_zone = 3;
+}
+
+message GetOrgAnalyticsDefaultsRequest {
+  string org_id = 1;
+}
+
+message UpdateOrgAnalyticsDefaultsRequest {
+  string org_id = 1;
+  string defaults_json = 2;          // {"presets": {"SCRUM": {...partial...}, ...}}
+}
+
+message OrgAnalyticsDefaults {
+  string org_id = 1;
+  string defaults_json = 2;
+  int32 version = 3;
+  bool can_edit = 4;
+}
+
+message ListMetricPresetsRequest {
+  string org_id = 1;
 }
 
 // ── Archive ──
