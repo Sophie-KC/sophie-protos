@@ -236,6 +236,24 @@ service TaskService {
   rpc GetProjectReportsDashboard(GetProjectReportsDashboardRequest) returns (Dashboard);       // project member
   rpc SaveProjectReportsDashboard(SaveProjectReportsDashboardRequest) returns (Dashboard);     // project manager
 
+  // ── Time tracking (claude/dashboards-design.md §5) ──
+  // Opt-in per project (the TIME_TRACKING feature); never a gate on anything else. Your own time: anyone with
+  // project access. Someone else's: project.worklog_manage holders, where the project allows it.
+  rpc GetProjectTimeSettings(GetProjectTimeSettingsRequest) returns (ProjectTimeSettings);           // project member
+  rpc UpdateProjectTimeSettings(UpdateProjectTimeSettingsRequest) returns (ProjectTimeSettings);     // project manager
+  rpc GetOrgTimeDefaults(GetOrgTimeDefaultsRequest) returns (OrgTimeDefaults);                       // org member
+  rpc UpdateOrgTimeDefaults(UpdateOrgTimeDefaultsRequest) returns (OrgTimeDefaults);                 // org admin
+  rpc GetTaskTime(GetTaskTimeRequest) returns (TaskTime);                                            // project member
+  rpc LogWork(LogWorkRequest) returns (Worklog);                                                     // project member
+  rpc UpdateWorklog(UpdateWorklogRequest) returns (Worklog);                                         // owner / worklog manager
+  rpc DeleteWorklog(DeleteWorklogRequest) returns (DeleteWorklogResponse);                           // owner / worklog manager
+  rpc SetTaskEstimate(SetTaskEstimateRequest) returns (TaskTime);                                    // project member
+  rpc StartTimer(StartTimerRequest) returns (RunningTimer);                                          // project member
+  rpc StopTimer(StopTimerRequest) returns (StopTimerResponse);                                       // the timer's owner
+  rpc DiscardTimer(DiscardTimerRequest) returns (DiscardTimerResponse);                              // the timer's owner
+  rpc GetMyTimer(GetMyTimerRequest) returns (GetMyTimerResponse);                                    // any caller
+  rpc GetTimesheet(GetTimesheetRequest) returns (Timesheet);                                         // org member; others need view-people
+
   // ── Archive (Trello-style: off every view, nothing deleted; restorable) ──
   rpc SetTaskArchived(SetTaskArchivedRequest) returns (Task);                                  // project member
   rpc ArchiveTasksInStatus(ArchiveTasksInStatusRequest) returns (ArchiveTasksInStatusResponse); // project member
@@ -1696,6 +1714,159 @@ message SaveProjectReportsDashboardRequest {
   string project_id = 1;
   optional string filters_json = 2;
   repeated DashboardWidgetInput widgets = 3;
+}
+
+// ── Time tracking ──
+
+message GetProjectTimeSettingsRequest {
+  string project_id = 1;
+}
+
+message UpdateProjectTimeSettingsRequest {
+  string project_id = 1;
+  bool enabled = 2;
+  optional string settings_json = 3;   // absent = keep; "{}" = follow the org default; else a complete document
+}
+
+message ProjectTimeSettings {
+  string project_id = 1;
+  bool enabled = 2;
+  string settings_json = 3;            // the effective settings
+  bool own_config = 4;                 // false = follows the org default
+  bool can_edit = 5;
+}
+
+message GetOrgTimeDefaultsRequest {
+  string org_id = 1;
+}
+
+message UpdateOrgTimeDefaultsRequest {
+  string org_id = 1;
+  string defaults_json = 2;            // partial settings; absent fields keep the built-in values
+}
+
+message OrgTimeDefaults {
+  string org_id = 1;
+  string defaults_json = 2;
+  bool can_edit = 3;
+}
+
+message Worklog {
+  string id = 1;
+  string task_id = 2;
+  string project_id = 3;
+  string user_id = 4;                  // whose time it is
+  string started_at = 5;               // ISO instant
+  int32 minutes = 6;
+  optional string description = 7;
+  string source = 8;                   // MANUAL | TIMER
+  string created_by = 9;               // differs from user_id when logged on someone's behalf
+  string created_at = 10;
+  string updated_at = 11;
+}
+
+message GetTaskTimeRequest {
+  string task_id = 1;
+}
+
+message TaskTime {
+  string task_id = 1;
+  bool enabled = 2;                    // false = the project doesn't track time: show nothing
+  string settings_json = 3;
+  optional int32 original_minutes = 4;
+  optional int32 remaining_minutes = 5;
+  int32 spent_minutes = 6;
+  repeated Worklog worklogs = 7;       // newest first
+  bool can_log_for_others = 8;
+  bool can_manage_worklogs = 9;
+}
+
+message LogWorkRequest {
+  string task_id = 1;
+  optional string user_id = 2;         // absent = the caller
+  string started_at = 3;               // ISO instant
+  int32 minutes = 4;                   // 1..1440
+  optional string description = 5;
+  string remaining_mode = 6;           // AUTO (default) | SET | LEAVE
+  optional int32 remaining_minutes = 7;
+}
+
+message UpdateWorklogRequest {
+  string worklog_id = 1;
+  string started_at = 2;
+  int32 minutes = 3;
+  optional string description = 4;
+}
+
+message DeleteWorklogRequest {
+  string worklog_id = 1;
+}
+
+message DeleteWorklogResponse {}
+
+message SetTaskEstimateRequest {
+  string task_id = 1;
+  optional int32 original_minutes = 2;
+  bool clear_original = 3;
+  optional int32 remaining_minutes = 4;
+  bool clear_remaining = 5;
+}
+
+message RunningTimer {
+  string task_id = 1;
+  string project_id = 2;
+  string project_key = 3;
+  int32 task_number = 4;
+  string task_title = 5;
+  string started_at = 6;
+  bool needs_confirmation = 7;         // running over 12h: ask before logging
+}
+
+message StartTimerRequest {
+  string task_id = 1;
+}
+
+message StopTimerRequest {
+  optional int32 minutes = 1;          // the duration the person confirmed (long timers)
+  optional string description = 2;
+}
+
+message StopTimerResponse {
+  optional Worklog worklog = 1;        // absent = nothing logged (under a minute, or no timer)
+}
+
+message DiscardTimerRequest {}
+
+message DiscardTimerResponse {}
+
+message GetMyTimerRequest {}
+
+message GetMyTimerResponse {
+  optional RunningTimer timer = 1;
+}
+
+message GetTimesheetRequest {
+  string org_id = 1;
+  repeated string user_ids = 2;        // empty = the caller
+  string from = 3;                     // ISO date, inclusive
+  string to = 4;                       // ISO date, inclusive; at most 93 days
+  string time_zone = 5;
+}
+
+message TimesheetCell {
+  string user_id = 1;
+  string task_id = 2;
+  string task_key = 3;
+  string task_title = 4;
+  string project_id = 5;
+  string day = 6;                      // ISO date in the requested zone
+  int32 minutes = 7;
+}
+
+message Timesheet {
+  repeated string people = 1;
+  repeated TimesheetCell cells = 2;
+  repeated string hidden_people = 3;   // asked for, but nothing of theirs is visible to the caller
 }
 
 // ── Archive ──
