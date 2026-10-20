@@ -220,6 +220,22 @@ service TaskService {
   rpc UpdateOrgAnalyticsDefaults(UpdateOrgAnalyticsDefaultsRequest) returns (OrgAnalyticsDefaults); // org admin
   rpc ListMetricPresets(ListMetricPresetsRequest) returns (MetricJson);                        // org member
 
+  // ── Dashboards: saved dashboards and each project's Reports dashboard (claude/dashboards-design.md §9) ──
+  // Visibility PRIVATE | ORG | SHARED | PROJECT. An unseen dashboard is NOT_FOUND; seeing one grants nothing
+  // about its data (every widget runs with the viewer's own project access).
+  rpc ListDashboards(ListDashboardsRequest) returns (ListDashboardsResponse);                  // org member
+  rpc GetDashboard(GetDashboardRequest) returns (Dashboard);                                   // can see it
+  rpc CreateDashboard(CreateDashboardRequest) returns (Dashboard);                             // org member; dashboards.max
+  rpc UpdateDashboard(UpdateDashboardRequest) returns (Dashboard);                             // can edit it
+  rpc SaveDashboardLayout(SaveDashboardLayoutRequest) returns (Dashboard);                     // can edit it
+  rpc DeleteDashboard(DeleteDashboardRequest) returns (DeleteDashboardResponse);               // owner / org admin
+  rpc DuplicateDashboard(DuplicateDashboardRequest) returns (Dashboard);                       // can see it; dashboards.max
+  rpc SetDashboardShares(SetDashboardSharesRequest) returns (Dashboard);                       // owner
+  rpc ListDashboardTemplates(ListDashboardTemplatesRequest) returns (ListDashboardTemplatesResponse); // any caller
+  // The saved Reports dashboard, or the template for the project's preset (id empty) until a manager saves.
+  rpc GetProjectReportsDashboard(GetProjectReportsDashboardRequest) returns (Dashboard);       // project member
+  rpc SaveProjectReportsDashboard(SaveProjectReportsDashboardRequest) returns (Dashboard);     // project manager
+
   // ── Archive (Trello-style: off every view, nothing deleted; restorable) ──
   rpc SetTaskArchived(SetTaskArchivedRequest) returns (Task);                                  // project member
   rpc ArchiveTasksInStatus(ArchiveTasksInStatusRequest) returns (ArchiveTasksInStatusResponse); // project member
@@ -1552,6 +1568,134 @@ message OrgAnalyticsDefaults {
 
 message ListMetricPresetsRequest {
   string org_id = 1;
+}
+
+message DashboardWidget {
+  string id = 1;
+  string metric = 2;                 // a RunMetric key, or "burndown" (drawn by the web from GetSprintBurndown)
+  optional string title = 3;         // absent = the metric's own translated name
+  string config_json = 4;            // {viz, bucket, groupBy, projectIds, range, from, to, sprintId, params}
+  int32 x = 5;                       // 12-column grid
+  int32 y = 6;
+  int32 w = 7;
+  int32 h = 8;
+}
+
+message DashboardShare {
+  string user_id = 1;
+  bool can_edit = 2;
+}
+
+message Dashboard {
+  string id = 1;                     // empty = a project's unsaved Reports dashboard (its template)
+  string org_id = 2;
+  string name = 3;
+  optional string description = 4;
+  string owner_id = 5;
+  string visibility = 6;             // PRIVATE | ORG | SHARED | PROJECT
+  string filters_json = 7;           // {projectIds, range, from, to, people, typeIds, labelIds}
+  optional string pinned_project_id = 8;
+  optional string template_key = 9;
+  string created_at = 10;
+  string updated_at = 11;
+  bool can_edit = 12;
+  repeated DashboardWidget widgets = 13;
+  repeated DashboardShare shares = 14; // only for callers who can edit
+}
+
+message DashboardSummary {
+  string id = 1;
+  string name = 2;
+  optional string description = 3;
+  string owner_id = 4;
+  string visibility = 5;
+  optional string template_key = 6;
+  string updated_at = 7;
+  bool can_edit = 8;
+  int32 widget_count = 9;
+}
+
+message ListDashboardsRequest {
+  string org_id = 1;
+}
+
+message ListDashboardsResponse {
+  repeated DashboardSummary dashboards = 1;
+}
+
+message GetDashboardRequest {
+  string dashboard_id = 1;
+}
+
+message CreateDashboardRequest {
+  string org_id = 1;
+  string name = 2;
+  optional string description = 3;
+  string visibility = 4;             // PRIVATE (default) | ORG | SHARED
+  optional string template_key = 5;  // portfolio | team | sprint | kanban | waterfall; absent = empty
+  repeated string project_ids = 6;   // the dashboard's project scope; required by project-scoped templates
+}
+
+message UpdateDashboardRequest {
+  string dashboard_id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string visibility = 4;    // owner only
+  optional string filters_json = 5;
+}
+
+message DashboardWidgetInput {
+  optional string id = 1;            // absent = new
+  string metric = 2;
+  optional string title = 3;
+  string config_json = 4;
+  int32 x = 5;
+  int32 y = 6;
+  int32 w = 7;
+  int32 h = 8;
+}
+
+message SaveDashboardLayoutRequest {
+  string dashboard_id = 1;
+  repeated DashboardWidgetInput widgets = 2; // the whole layout; replaces every widget
+}
+
+message DeleteDashboardRequest {
+  string dashboard_id = 1;
+}
+
+message DeleteDashboardResponse {}
+
+message DuplicateDashboardRequest {
+  string dashboard_id = 1;
+  optional string name = 2;          // absent = "<name> (copy)"
+}
+
+message SetDashboardSharesRequest {
+  string dashboard_id = 1;
+  repeated DashboardShare shares = 2; // replaces every share; each person must be in the org
+}
+
+message ListDashboardTemplatesRequest {}
+
+message DashboardTemplate {
+  string key = 1;
+  bool project_scoped = 2;
+  repeated DashboardWidget widgets = 3;
+}
+
+message ListDashboardTemplatesResponse {
+  repeated DashboardTemplate templates = 1;
+}
+
+message GetProjectReportsDashboardRequest {
+  string project_id = 1;
+}
+
+message SaveProjectReportsDashboardRequest {
+  string project_id = 1;
+  optional string filters_json = 2;
+  repeated DashboardWidgetInput widgets = 3;
 }
 
 // ── Archive ──
