@@ -64,6 +64,8 @@ message SearchRequest {
   bool include_archived = 8;
   bool include_facets = 9;
   .org.sophie.common.PageRequest page = 10;    // shared contract; limit clamped to 50
+  repeated string team_ids = 11;               // facet filter: tasks owned by these teams (only tasks carry one)
+  repeated string component_ids = 12;         // facet filter: tasks in these components
   // NO user_id / org_id. The caller is the verified principal; the org is proven via IsOrgMember.
 
   enum Sort {
@@ -114,6 +116,8 @@ message SearchResponse {
   repeated Facet type_facets = 6;
   repeated Facet container_facets = 7;
   repeated Facet author_facets = 8;
+  repeated Facet team_facets = 9;       // owning team of the matching tasks; key = team id, label = team name
+  repeated Facet component_facets = 10; // component of the matching tasks; key = component id, label = "KEY · name"
 }
 
 message ReindexRequest {

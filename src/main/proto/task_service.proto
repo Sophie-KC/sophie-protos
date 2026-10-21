@@ -39,6 +39,8 @@ service TaskService {
   rpc CreateComponent(CreateComponentRequest) returns (Component);
   rpc UpdateComponent(UpdateComponentRequest) returns (Component);
   rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse);
+  // Names for component ids (search facet labels). Only components of projects the caller can open are answered.
+  rpc ListComponentNames(ListComponentNamesRequest) returns (ListComponentNamesResponse);
   rpc DeleteProject(DeleteProjectRequest) returns (google.protobuf.Empty);   // soft-delete; creator or project admin
   rpc UpdateProject(UpdateProjectRequest) returns (Project);                 // rename; creator or project admin
 
@@ -482,6 +484,20 @@ message ListComponentsRequest {
 
 message ListComponentsResponse {
   repeated Component components = 1;
+}
+
+message ListComponentNamesRequest {
+  repeated string component_ids = 1;
+}
+
+message ComponentName {
+  string id = 1;
+  string name = 2;
+  string project_key = 3;
+}
+
+message ListComponentNamesResponse {
+  repeated ComponentName components = 1;
 }
 
 message ListOpenProjectsRequest {
