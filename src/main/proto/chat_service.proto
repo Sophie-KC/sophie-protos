@@ -402,6 +402,11 @@ message SendMessageRequest {
   // publishes nothing new, instead of creating a duplicate. Absent = no idempotency check (legacy
   // callers / server-initiated sends, if any).
   optional string client_message_id = 11;
+  // Teams @mentioned in the message (a `teamMention` node in the content). The server expands each to its current
+  // members who are IN THIS CONVERSATION — the same rule as mention_everyone — and unions them into the mentioned
+  // users, so a team never makes a send fail the way an explicit mention of a non-member does. A team that is
+  // archived, unknown, or from another org is ignored.
+  repeated string mentioned_team_ids = 12;
 }
 
 message EditMessageRequest {
