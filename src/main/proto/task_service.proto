@@ -113,7 +113,7 @@ service TaskService {
   rpc CreateSprint(CreateSprintRequest) returns (Sprint);
   rpc UpdateSprint(UpdateSprintRequest) returns (Sprint);
   rpc ListSprints(ListSprintsRequest) returns (ListSprintsResponse);
-  rpc StartSprint(StartSprintRequest) returns (Sprint);               // FUTURE → ACTIVE (one active/project)
+  rpc StartSprint(StartSprintRequest) returns (Sprint);               // FUTURE → ACTIVE (one active per board)
   rpc CompleteSprint(CompleteSprintRequest) returns (Sprint);         // ACTIVE → COMPLETE; carries survivors
   rpc ReopenSprint(ReopenSprintRequest) returns (Sprint);            // COMPLETE → ACTIVE; no task moves
   rpc DeleteSprint(DeleteSprintRequest) returns (google.protobuf.Empty); // FUTURE only; tasks → backlog
@@ -607,6 +607,13 @@ message Board {
   string default_filter = 4; // opaque JSON string
   google.protobuf.Timestamp created_at = 5;
   bool is_default = 6;        // the board a project opens on (one per project)
+  // Which tasks belong to this board, enforced by the server (unlike default_filter, which is a view the client
+  // applies): a JSON object {"teamIds":[],"componentIds":[],"labelIds":[],"assigneeIds":[],"typeIds":[]} — a task
+  // matches when, for every non-empty list, it has one of those values. "{}" = every task in the project.
+  string scope = 7;
+  // True for the default board and for any board with a non-empty scope: such a board runs its OWN sprints (one
+  // active at a time). Any other board is just a saved view over the default board's sprints.
+  bool owns_sprints = 8;
 }
 
 message CreateBoardRequest {
@@ -615,6 +622,7 @@ message CreateBoardRequest {
   string project_id = 2;
   string name = 3;
   string default_filter = 4; // optional; defaults to "{}"
+  string scope = 5;          // optional; defaults to "{}" (see Board.scope)
 }
 
 message ListBoardsRequest {
@@ -634,6 +642,7 @@ message UpdateBoardRequest {
   optional string name = 3;
   optional string default_filter = 4;
   optional bool make_default = 5; // true = make this the project's default board (unsets any other)
+  optional string scope = 6;      // see Board.scope. Refused while it would leave a board that owns sprints with none.
 }
 
 message DeleteBoardRequest {
@@ -1077,6 +1086,7 @@ message Sprint {
   optional google.protobuf.Timestamp started_at = 8;
   optional google.protobuf.Timestamp completed_at = 9;
   google.protobuf.Timestamp created_at = 10;
+  string board_id = 11;   // the board that owns it; one sprint is ACTIVE per board, not per project
 }
 
 message CreateSprintRequest {
@@ -1087,6 +1097,8 @@ message CreateSprintRequest {
   optional string goal = 4;
   optional string start_date = 5;
   optional string end_date = 6;
+  // The board that will own it. Absent = the project's default board. Must be a board that owns sprints.
+  optional string board_id = 7;
 }
 
 message UpdateSprintRequest {
@@ -1103,6 +1115,7 @@ message ListSprintsRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string project_id = 2;
+  optional string board_id = 3;   // only this board's sprints; absent = every sprint in the project
 }
 
 message ListSprintsResponse {
@@ -1625,6 +1638,7 @@ message SprintBurndown {
 message ListSprintVelocityRequest {
   string project_id = 1;
   int32 last = 2;                  // closed sprints, newest first; 0 = 7
+  optional string board_id = 3;    // only this board's sprints; absent = every sprint in the project
 }
 
 message SprintVelocity {
