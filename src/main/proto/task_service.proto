@@ -231,6 +231,7 @@ service TaskService {
   rpc DeleteDashboard(DeleteDashboardRequest) returns (DeleteDashboardResponse);               // owner / org admin
   rpc DuplicateDashboard(DuplicateDashboardRequest) returns (Dashboard);                       // can see it; dashboards.max
   rpc SetDashboardShares(SetDashboardSharesRequest) returns (Dashboard);                       // owner
+  rpc UpdateDashboardViewerState(UpdateDashboardViewerStateRequest) returns (DashboardViewerState); // can see it; the caller's own state
   rpc ListDashboardTemplates(ListDashboardTemplatesRequest) returns (ListDashboardTemplatesResponse); // any caller
   // The saved Reports dashboard, or the template for the project's preset (id empty) until a manager saves.
   rpc GetProjectReportsDashboard(GetProjectReportsDashboardRequest) returns (Dashboard);       // project member
@@ -1665,6 +1666,26 @@ message Dashboard {
   bool can_edit = 12;
   repeated DashboardWidget widgets = 13;
   repeated DashboardShare shares = 14; // only for callers who can edit
+  DashboardViewerState me = 15;        // the caller's own: "Only for you" filters, star, last opened, table views
+}
+
+// One person's state on one dashboard (design_handoff_dashboards README §2): filters they changed for themselves,
+// whether they starred it, when they last opened it, and which widgets they read as a table.
+message DashboardViewerState {
+  optional string filters_json = 1;  // absent = the dashboard's defaults
+  bool starred = 2;
+  optional string last_opened_at = 3;
+  repeated string table_widget_ids = 4;
+}
+
+message UpdateDashboardViewerStateRequest {
+  string dashboard_id = 1;
+  optional string filters_json = 2;  // set "Only for you" filters
+  bool clear_filters = 3;            // back to the dashboard's defaults
+  optional bool starred = 4;
+  bool opened = 5;                   // stamp last opened = now
+  bool set_table_widgets = 6;        // replace table_widget_ids with the list below
+  repeated string table_widget_ids = 7;
 }
 
 message DashboardSummary {
@@ -1677,6 +1698,12 @@ message DashboardSummary {
   string updated_at = 7;
   bool can_edit = 8;
   int32 widget_count = 9;
+  bool starred = 10;                 // the caller's
+  optional string last_opened_at = 11; // the caller's
+  string filters_json = 12;          // the dashboard's defaults: which projects its cards count "need you" over
+  optional string pinned_project_id = 13;
+  repeated DashboardWidget widgets = 14; // the layout, for the card's sketch
+  int32 share_count = 15;            // people it is shared with (SHARED)
 }
 
 message ListDashboardsRequest {
