@@ -32,6 +32,13 @@ service TaskService {
   // Join an open project: the caller is given the org's "Project Member" role on it. Refused for a members-only
   // project and for a guest. Idempotent — already a member just returns the project.
   rpc JoinProject(JoinProjectRequest) returns (Project);
+
+  // ── Components (claude/teams-work-structure-design.md §5.2) ──
+  // An area or service inside a project, with an optional lead and default owning team. Any project member reads;
+  // creating, editing and archiving need project manage access.
+  rpc CreateComponent(CreateComponentRequest) returns (Component);
+  rpc UpdateComponent(UpdateComponentRequest) returns (Component);
+  rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse);
   rpc DeleteProject(DeleteProjectRequest) returns (google.protobuf.Empty);   // soft-delete; creator or project admin
   rpc UpdateProject(UpdateProjectRequest) returns (Project);                 // rename; creator or project admin
 
@@ -313,6 +320,8 @@ message Project {
   // Whether the caller holds a role on it (directly or through a team). False only for an open project the
   // caller is looking at without having joined.
   bool is_member = 15;
+  // The team that owns new tasks here when neither the task nor its component names one. Absent = none.
+  optional string default_team_id = 16;
 }
 
 // Wrapper so an update can say "set to this list" (even an empty one) apart from "leave unchanged".
@@ -415,6 +424,48 @@ message UpdateProjectRequest {
   CardFieldList default_card_fields = 4; // present = set the team default (project manager)
   bool clear_default_card_fields = 5;    // true = back to the platform default
   optional string visibility = 6;        // "MEMBERS" | "ORG" (project manager); absent = unchanged
+  optional string default_team_id = 7;   // present-empty clears (project manager)
+}
+
+message Component {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  string description = 4;
+  optional string lead_user_id = 5;
+  optional string default_team_id = 6;
+  string auto_assign = 7;       // "NONE" | "LEAD": also assign the lead to a new task with no assignee
+  bool archived = 8;            // archived components can't be chosen for new tasks; existing tasks keep theirs
+  int32 task_count = 9;         // live tasks in it, for the settings list
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message CreateComponentRequest {
+  string project_id = 1;
+  string name = 2;
+  string description = 3;
+  optional string lead_user_id = 4;
+  optional string default_team_id = 5;
+  optional string auto_assign = 6;   // default NONE
+}
+
+message UpdateComponentRequest {
+  string component_id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string lead_user_id = 4;     // present-empty clears
+  optional string default_team_id = 5;  // present-empty clears
+  optional string auto_assign = 6;
+  optional bool archived = 7;
+}
+
+message ListComponentsRequest {
+  string project_id = 1;
+  bool include_archived = 2;
+}
+
+message ListComponentsResponse {
+  repeated Component components = 1;
 }
 
 message ListOpenProjectsRequest {
@@ -662,6 +713,10 @@ message Task {
   optional string start_date = 23;       // ISO yyyy-MM-dd; absent = none. Never after due_date.
   // Set = archived: off the board and every list (ListTasks excludes it unless asked), never deleted.
   optional google.protobuf.Timestamp archived_at = 24;
+  // The team that owns this task (an org-service team id; it need not have access to the project). Absent = none.
+  optional string team_id = 25;
+  // The area/service inside the project this task belongs to. Absent = none.
+  optional string component_id = 26;
 }
 
 // Lightweight reference for dependency lists — enough to render a link, never full task detail.
@@ -696,6 +751,10 @@ message CreateTaskRequest {
   // Create straight into this column (a status of the project) — the board's inline "+ Add a card".
   // Absent = the first status, as before. Creating is not a transition, so no transition check applies.
   optional string status_id = 16;
+  // Owning team. Absent = the component's default team, else the project's, else none.
+  optional string team_id = 17;
+  optional string component_id = 18;
+  // A component with auto_assign LEAD also assigns its lead when assignee_id is absent.
 }
 
 message GetTaskRequest {
@@ -892,6 +951,8 @@ message UpdateTaskRequest {
   optional int32 story_points = 8;  // present clears when < 0 (see service)
   optional string due_date = 9;     // present-empty clears
   optional string start_date = 10;  // present-empty clears
+  optional string team_id = 11;      // present-empty clears
+  optional string component_id = 12; // present-empty clears. Changing it never rewrites the team.
 }
 
 message ChangeTaskStatusRequest {
