@@ -108,6 +108,24 @@ service OrgService {
   rpc RevokeRoleAssignment(RevokeRoleAssignmentRequest) returns (google.protobuf.Empty);
   rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse);
 
+  // ── Teams (claude/teams-work-structure-design.md §4) ──
+  // Org-level named groups of people. A team can be given a role at a PROJECT / SPACE / CHANNEL scope (AssignRole
+  // with team_id instead of user_id); everyone in it then has that access, and loses it the moment they leave the
+  // team. Creating, archiving and editing a team is Org Admin (or the team.manage permission); a team's LEADs manage
+  // its members. Any org member may list and read teams.
+  rpc CreateTeam(CreateTeamRequest) returns (Team);
+  rpc UpdateTeam(UpdateTeamRequest) returns (Team);
+  rpc SetTeamArchived(SetTeamArchivedRequest) returns (Team);
+  rpc GetTeam(GetTeamRequest) returns (Team);
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
+  rpc ListMyTeams(ListMyTeamsRequest) returns (ListTeamsResponse);
+  // Names for a set of team ids (role-assignment lists, chips). Teams of orgs the caller isn't in are omitted.
+  rpc BatchGetTeams(BatchGetTeamsRequest) returns (ListTeamsResponse);
+  rpc ListTeamMembers(ListTeamMembersRequest) returns (ListTeamMembersResponse);
+  rpc AddTeamMember(AddTeamMemberRequest) returns (TeamMember);
+  rpc SetTeamMemberRole(SetTeamMemberRoleRequest) returns (TeamMember);
+  rpc RemoveTeamMember(RemoveTeamMemberRequest) returns (google.protobuf.Empty);
+
   // "Which roles do I hold in this org?" — the CALLER's own role ids, at every scope, from the
   // verified principal. Distinct from ListRoleAssignments, which answers the same question about
   // SOMEONE ELSE and is therefore Org-Admin-gated; this one can't leak anything the caller doesn't
@@ -791,10 +809,11 @@ message Role {
 
 message RoleAssignment {
   string id = 1;
-  string user_id = 2;
+  string user_id = 2;        // empty when the subject is a team
   string role_id = 3;
   string scope_type = 4;
   string scope_id = 5;       // the specific project/space/channel id; empty for ORG scope
+  string team_id = 6;        // set instead of user_id when the role is held by a whole team
 }
 
 // Wrapper so an unset `permissions` field (partial update) is distinguishable from an
@@ -842,10 +861,11 @@ message ListRolesResponse {
 message AssignRoleRequest {
   reserved 1; // was: requested_by_user_id (phase-2 identity field, deleted)
   reserved "requested_by_user_id";
-  string user_id = 2;              // target org member being assigned the role
+  string user_id = 2;              // target org member being assigned the role — OR leave empty and set team_id
   string role_id = 3;
   string scope_type = 4;           // must equal the role's scope_type
   string scope_id = 5;             // empty for ORG scope
+  string team_id = 6;              // target team (exactly one of user_id / team_id). PROJECT, SPACE and CHANNEL only.
 }
 
 message UpdateRoleAssignmentRequest {
@@ -916,6 +936,92 @@ message ListRoleAssignmentsRequest {
 
 message ListRoleAssignmentsResponse {
   repeated RoleAssignment assignments = 1;
+}
+
+// ===================== Teams =====================
+
+message Team {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;
+  string handle = 4;                 // unique per org, [a-z0-9-]; what an @mention will use. Fixed once created.
+  string description = 5;
+  string created_by = 6;
+  google.protobuf.Timestamp created_at = 7;
+  bool archived = 8;                 // an archived team grants nothing and is hidden from pickers
+  int32 member_count = 9;
+  string my_role = 10;               // the caller's role in this team: "LEAD", "MEMBER", or "" if not a member
+}
+
+message TeamMember {
+  string user_id = 1;
+  string role = 2;                   // "LEAD" | "MEMBER"
+  google.protobuf.Timestamp added_at = 3;
+}
+
+message CreateTeamRequest {
+  string org_id = 1;
+  string name = 2;
+  string handle = 3;                 // optional; derived from the name when blank
+  string description = 4;
+}
+
+message UpdateTeamRequest {
+  string team_id = 1;
+  optional string name = 2;
+  optional string description = 3;
+}
+
+message SetTeamArchivedRequest {
+  string team_id = 1;
+  bool archived = 2;
+}
+
+message GetTeamRequest {
+  string team_id = 1;
+}
+
+message ListTeamsRequest {
+  string org_id = 1;
+  bool include_archived = 2;
+  string query = 3;                  // case-insensitive match on name or handle
+}
+
+message ListMyTeamsRequest {
+  string org_id = 1;
+}
+
+message BatchGetTeamsRequest {
+  repeated string team_ids = 1;
+}
+
+message ListTeamsResponse {
+  repeated Team teams = 1;
+}
+
+message ListTeamMembersRequest {
+  string team_id = 1;
+}
+
+message ListTeamMembersResponse {
+  repeated TeamMember members = 1;
+}
+
+message AddTeamMemberRequest {
+  string team_id = 1;
+  string user_id = 2;                // must already be a member of the team's org
+  string role = 3;                   // "LEAD" | "MEMBER"; blank = MEMBER
+}
+
+message SetTeamMemberRoleRequest {
+  string team_id = 1;
+  string user_id = 2;
+  string role = 3;
+}
+
+message RemoveTeamMemberRequest {
+  string team_id = 1;
+  string user_id = 2;
 }
 
 // ===================== Permission catalog =====================
