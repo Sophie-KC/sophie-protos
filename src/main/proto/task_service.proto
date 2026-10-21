@@ -74,6 +74,7 @@ service TaskService {
   rpc DeleteTeamBoard(DeleteTeamBoardRequest) returns (google.protobuf.Empty);     // board admin; refused while it has sprints
   rpc ListTeamBoardTasks(ListTeamBoardTasksRequest) returns (ListTeamBoardTasksResponse); // only tasks in projects the caller can reach
   rpc MoveTeamBoardCard(MoveTeamBoardCardRequest) returns (Task);                  // to a column: the task's own project decides the status
+  rpc RankTeamBoardCard(RankTeamBoardCardRequest) returns (google.protobuf.Empty); // order across projects: ranks are the board's own
 
   // ── Labels (any project member) ──
   rpc CreateLabel(CreateLabelRequest) returns (Label);
@@ -629,6 +630,9 @@ message Board {
   // True for the default board and for any board with a non-empty scope: such a board runs its OWN sprints (one
   // active at a time). Any other board is just a saved view over the default board's sprints.
   bool owns_sprints = 8;
+  // How many days a new sprint on this board runs when it starts without an end date. Absent = the project's
+  // Sprints setting (default 14).
+  optional int32 sprint_length_days = 9;
 }
 
 message CreateBoardRequest {
@@ -658,6 +662,7 @@ message UpdateBoardRequest {
   optional string default_filter = 4;
   optional bool make_default = 5; // true = make this the project's default board (unsets any other)
   optional string scope = 6;      // see Board.scope. Refused while it would leave a board that owns sprints with none.
+  optional int32 sprint_length_days = 7;   // 1-90; 0 = back to the project's default
 }
 
 message DeleteBoardRequest {
@@ -2289,6 +2294,7 @@ message TeamBoard {
   repeated string admin_ids = 8;
   bool can_manage = 9;                           // the caller is a board admin
   google.protobuf.Timestamp created_at = 10;
+  optional int32 sprint_length_days = 11;   // as Board.sprint_length_days
 }
 
 message CreateTeamBoardRequest {
@@ -2317,6 +2323,7 @@ message UpdateTeamBoardRequest {
   optional StringList project_ids = 4;     // replaces the set
   optional TeamBoardColumns columns = 5;   // replaces the columns (ids kept for those given)
   optional StringList admin_ids = 6;       // replaces the admin list; never leaves it empty
+  optional int32 sprint_length_days = 7;   // 1-90; 0 = the default (14)
 }
 
 message DeleteTeamBoardRequest {
@@ -2397,4 +2404,13 @@ message InitiativeRollup {
 
 message ListInitiativesResponse {
   repeated InitiativeRollup initiatives = 1;
+}
+
+// Place a card between two others in the board's own order (ranks within a project don't compare across projects, so a
+// team board keeps a separate rank per card). Either neighbour may be absent to go to an end.
+message RankTeamBoardCardRequest {
+  string board_id = 1;
+  string task_id = 2;
+  optional string previous_task_id = 3;
+  optional string next_task_id = 4;
 }

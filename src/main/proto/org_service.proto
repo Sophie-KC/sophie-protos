@@ -940,10 +940,15 @@ message ListRoleAssignmentsRequest {
   optional string scope_id = 3;
   optional string user_id = 4;
   optional string org_id = 5;
+  // Query mode C: where a TEAM holds roles (every scope in the org). For an org admin or a member of the team.
+  optional string team_id = 6;
 }
 
 message ListRoleAssignmentsResponse {
   repeated RoleAssignment assignments = 1;
+  // Mode A only: whether the CALLER may add, change and remove the roles at the requested scope (an Org Admin,
+  // the project's admin, or a holder of project.member_manage) — so the screen shows edit controls to exactly them.
+  bool can_manage = 2;
 }
 
 // ===================== Teams =====================

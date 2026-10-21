@@ -26,6 +26,9 @@ service ChatService {
   rpc CreateGroupChannel(CreateGroupChannelRequest) returns (Conversation);
   // CHANNEL only (rejected for DIRECT). Caller must be OWNER or ADMIN of the conversation.
   rpc AddConversationMember(AddConversationMemberRequest) returns (google.protobuf.Empty);
+  // One-time expansion of a team into the channel's members (CHANNEL only; caller must be OWNER or ADMIN). The team's
+  // CURRENT org members who aren't in yet are added; later team changes don't follow.
+  rpc AddTeamToConversation(AddTeamToConversationRequest) returns (AddTeamToConversationResponse);
   // CHANNEL only (rejected for DIRECT). Caller must be OWNER or ADMIN; the OWNER cannot be removed
   // this way — ownership must be transferred first.
   rpc RemoveConversationMember(RemoveConversationMemberRequest) returns (google.protobuf.Empty);
@@ -281,6 +284,16 @@ message CreateGroupChannelRequest {
 message AddConversationMemberRequest {
   string conversation_id = 1;
   string user_id = 2;
+}
+
+message AddTeamToConversationRequest {
+  string conversation_id = 1;
+  string team_id = 2;
+}
+
+message AddTeamToConversationResponse {
+  int32 added_count = 1;
+  int32 already_members_count = 2;
 }
 
 message RemoveConversationMemberRequest {
