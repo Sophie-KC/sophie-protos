@@ -74,6 +74,10 @@ service OrgService {
   // creation auto-assigns Org Admin. NOT the admin-gated public AssignRole — that can't grant a
   // non-admin creator their own initial scope access. Idempotent.
   rpc AssignScopeRole(AssignScopeRoleRequest) returns (google.protobuf.Empty);
+  // Trusted-internal: is this user a FULL member of the org — a member whose ORG role is not the seeded "Guest"
+  // one? The test for "open to the whole org" resources: a guest sees only the containers they're added to.
+  // Request/response are IsOrgMember's; is_member means "member and not a guest".
+  rpc IsFullOrgMember(IsOrgMemberRequest) returns (IsOrgMemberResponse);
   // "Does this user hold this role at all?" (any scope) — for a role used as a pseudo-group, e.g.
   // Doc Service enforcing a page_restrictions ROLE subject. Trusted-internal.
   rpc HasRoleAssignment(HasRoleAssignmentRequest) returns (HasRoleAssignmentResponse);
@@ -632,6 +636,10 @@ message AssignScopeRoleRequest {
   string user_id = 2;
   string scope_type = 3; // non-ORG scope, e.g. SPACE
   string scope_id = 4;   // the scoped resource id (e.g. spaceId)
+  // false (default): the scope's admin role, for a creator. true: the org's plain member role for the scope
+  // (e.g. "Project Member"), created on first use — for someone joining an open project. Never downgrades: a
+  // user who already holds any role there is left as they are.
+  bool as_member = 5;
 }
 
 message HasRoleAssignmentRequest {

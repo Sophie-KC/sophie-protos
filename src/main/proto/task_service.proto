@@ -25,7 +25,13 @@ service TaskService {
   // seeds a default workflow (To Do / In Progress / Done, permissive transitions).
   rpc CreateProject(CreateProjectRequest) returns (Project);
   rpc GetProject(GetProjectRequest) returns (Project);                       // requires project access
-  rpc ListMyProjects(ListMyProjectsRequest) returns (ListMyProjectsResponse); // accessible projects in an org
+  rpc ListMyProjects(ListMyProjectsRequest) returns (ListMyProjectsResponse); // projects the caller is a MEMBER of, in an org
+  // Open projects (visibility ORG) the caller can see but has not joined — the "browse" list. Any full org member
+  // (a guest sees none). Each comes back with is_member = false.
+  rpc ListOpenProjects(ListOpenProjectsRequest) returns (ListMyProjectsResponse);
+  // Join an open project: the caller is given the org's "Project Member" role on it. Refused for a members-only
+  // project and for a guest. Idempotent — already a member just returns the project.
+  rpc JoinProject(JoinProjectRequest) returns (Project);
   rpc DeleteProject(DeleteProjectRequest) returns (google.protobuf.Empty);   // soft-delete; creator or project admin
   rpc UpdateProject(UpdateProjectRequest) returns (Project);                 // rename; creator or project admin
 
@@ -301,6 +307,12 @@ message Project {
   // Each viewer may still choose their own for this project.
   repeated string default_card_fields = 12;
   bool has_default_card_fields = 13;
+  // "MEMBERS" (default: only people given a role on it) or "ORG" (open: every full member of the org — not a
+  // guest — may view, comment and create tasks; changing settings still needs a role).
+  string visibility = 14;
+  // Whether the caller holds a role on it (directly or through a team). False only for an open project the
+  // caller is looking at without having joined.
+  bool is_member = 15;
 }
 
 // Wrapper so an update can say "set to this list" (even an empty one) apart from "leave unchanged".
@@ -369,6 +381,8 @@ message CreateProjectRequest {
   bool seed_phases = 7;
   // uz | en | ru — the language the seeded statuses and phases are named in. Empty = en.
   string locale = 8;
+  // "MEMBERS" | "ORG". Empty = MEMBERS.
+  string visibility = 9;
 }
 
 message GetProjectRequest {
@@ -400,6 +414,15 @@ message UpdateProjectRequest {
   optional string name = 3; // partial: absent = unchanged
   CardFieldList default_card_fields = 4; // present = set the team default (project manager)
   bool clear_default_card_fields = 5;    // true = back to the platform default
+  optional string visibility = 6;        // "MEMBERS" | "ORG" (project manager); absent = unchanged
+}
+
+message ListOpenProjectsRequest {
+  string org_id = 1;
+}
+
+message JoinProjectRequest {
+  string project_id = 1;
 }
 
 // ── Task Types ──
