@@ -1689,8 +1689,11 @@ message RunMetricRequest {
   string to = 8;                     // ISO yyyy-MM-dd, inclusive; empty = today
   string time_zone = 9;              // IANA zone days are cut in; empty = UTC
   string bucket = 10;                // DAY | WEEK | MONTH; empty = the metric's default
-  string group_by = 11;              // NONE | PROJECT | PERSON | TYPE | STATUS | PRIORITY; empty = default
-  map<string, string> params = 12;   // metric-specific, e.g. unit=POINTS, last=7
+  string group_by = 11;              // NONE | PROJECT | PERSON | TYPE | STATUS | PRIORITY | TEAM | COMPONENT | INITIATIVE; empty = default
+  map<string, string> params = 12;   // metric-specific, e.g. unit=POINTS, last=7, boardId=<board>
+  repeated string team_ids = 13;       // only tasks owned by one of these teams
+  repeated string component_ids = 14;  // only tasks in one of these components
+  repeated string initiative_ids = 15; // only tasks that roll up (themselves or through their epic) to one of these
 }
 
 // The tasks behind one mark of a chart. selector: bucket (a bucket's first day), group (a group key),
