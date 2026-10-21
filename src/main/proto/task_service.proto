@@ -116,6 +116,12 @@ service TaskService {
   rpc ListTaskComments(ListTaskCommentsRequest) returns (ListTaskCommentsResponse);
   rpc ListTaskActivity(ListTaskActivityRequest) returns (ListTaskActivityResponse); // field/status change feed (History tab)
   rpc SetTaskEpic(SetTaskEpicRequest) returns (Task);                 // group under an epic; null clears
+
+  // ── Initiatives: a level above epics, across projects (teams design §7) ──
+  rpc CreateInitiative(CreateInitiativeRequest) returns (Task);                 // project member; makes the org's Initiative type on first use
+  rpc SetTaskInitiative(SetTaskInitiativeRequest) returns (Task);               // access to the epic AND the initiative; null clears
+  rpc GetInitiativeRollup(GetInitiativeRollupRequest) returns (InitiativeRollup); // computed with the caller's access
+  rpc ListInitiatives(ListInitiativesRequest) returns (ListInitiativesResponse);  // the ones the caller can reach, summarised
   rpc RankTask(RankTaskRequest) returns (Task);                       // manual backlog reorder
 
   // ── Scrum sprints ──
@@ -735,6 +741,8 @@ message Task {
   optional string team_id = 25;
   // The area/service inside the project this task belongs to. Absent = none.
   optional string component_id = 26;
+  // The initiative (a task of the Initiative type, in any project of the org) this epic rolls up to. Epics only.
+  optional string initiative_id = 27;
 }
 
 // Lightweight reference for dependency lists — enough to render a link, never full task detail.
@@ -2326,4 +2334,64 @@ message MoveTeamBoardCardRequest {
   string board_id = 1;
   string task_id = 2;
   string column_id = 3;
+}
+
+
+// ───────────────────────── Initiatives ─────────────────────────
+
+message CreateInitiativeRequest {
+  string project_id = 1;            // where the initiative lives — usually a "Portfolio" project
+  string title = 2;
+  optional string description = 3;
+  optional string locale = 4;       // names the Initiative type the first time it is made for the org
+}
+
+message SetTaskInitiativeRequest {
+  string task_id = 1;               // an epic or phase
+  optional string initiative_id = 2; // absent/empty = remove from its initiative
+}
+
+message GetInitiativeRollupRequest {
+  string initiative_id = 1;
+}
+
+message ListInitiativesRequest {
+  string org_id = 1;
+}
+
+message InitiativeEpic {
+  string task_id = 1;
+  string project_id = 2;
+  string project_key = 3;
+  int32 task_number = 4;
+  string title = 5;
+  string status_id = 6;
+  bool done = 7;                    // the epic itself is in a DONE status
+  int32 tasks_total = 8;            // live, unarchived tasks grouped under it
+  int32 tasks_done = 9;
+  int32 points_total = 10;
+  int32 points_done = 11;
+  optional string start_date = 12;
+  optional string due_date = 13;
+}
+
+// Progress is the caller's own view: epics in projects they can't reach are only counted, and add nothing to the
+// totals or the dates (so two people can see different numbers for one initiative, by design).
+message InitiativeRollup {
+  Task initiative = 1;
+  string project_key = 2;           // of the initiative's own project
+  repeated InitiativeEpic epics = 3;   // empty in a list
+  int32 epic_count = 4;             // visible epics
+  int32 epics_done = 5;
+  int32 hidden_epic_count = 6;
+  int32 tasks_total = 7;
+  int32 tasks_done = 8;
+  int32 points_total = 9;
+  int32 points_done = 10;
+  optional string start_date = 11;  // earliest start among visible epics
+  optional string due_date = 12;    // latest due among visible epics
+}
+
+message ListInitiativesResponse {
+  repeated InitiativeRollup initiatives = 1;
 }
