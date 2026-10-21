@@ -236,6 +236,7 @@ service TaskService {
   // The saved Reports dashboard, or the template for the project's preset (id empty) until a manager saves.
   rpc GetProjectReportsDashboard(GetProjectReportsDashboardRequest) returns (Dashboard);       // project member
   rpc SaveProjectReportsDashboard(SaveProjectReportsDashboardRequest) returns (Dashboard);     // project manager
+  rpc ResetProjectReportsDashboard(ResetProjectReportsDashboardRequest) returns (ResetProjectReportsDashboardResponse); // project manager
 
   // ── Time tracking (claude/dashboards-design.md §5) ──
   // Opt-in per project (the TIME_TRACKING feature); never a gate on anything else. Your own time: anyone with
@@ -1667,6 +1668,17 @@ message Dashboard {
   repeated DashboardWidget widgets = 13;
   repeated DashboardShare shares = 14; // only for callers who can edit
   DashboardViewerState me = 15;        // the caller's own: "Only for you" filters, star, last opened, table views
+  optional string updated_by = 16;     // who last changed the layout or filters ("customised by Nodira on 3 Oct")
+}
+
+message ResetProjectReportsDashboardRequest {
+  string project_id = 1;
+  bool keep_copy = 2;                  // first save the current layout as a private dashboard of the caller's
+}
+
+message ResetProjectReportsDashboardResponse {
+  Dashboard dashboard = 1;             // the template, as GetProjectReportsDashboard now returns it
+  optional string copy_id = 2;         // the kept copy
 }
 
 // One person's state on one dashboard (design_handoff_dashboards README §2): filters they changed for themselves,
