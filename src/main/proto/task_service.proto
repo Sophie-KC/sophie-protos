@@ -66,6 +66,15 @@ service TaskService {
   rpc UpdateBoard(UpdateBoardRequest) returns (Board);
   rpc DeleteBoard(DeleteBoardRequest) returns (google.protobuf.Empty);
 
+  // ── Team boards: one board over several projects (teams design §6.3). Org-level, not project-level. ──
+  rpc CreateTeamBoard(CreateTeamBoardRequest) returns (TeamBoard);                 // full org member with access to every project chosen
+  rpc ListTeamBoards(ListTeamBoardsRequest) returns (ListTeamBoardsResponse);      // boards where the caller can reach >= 1 project
+  rpc GetTeamBoard(GetTeamBoardRequest) returns (TeamBoard);
+  rpc UpdateTeamBoard(UpdateTeamBoardRequest) returns (TeamBoard);                 // board admin
+  rpc DeleteTeamBoard(DeleteTeamBoardRequest) returns (google.protobuf.Empty);     // board admin; refused while it has sprints
+  rpc ListTeamBoardTasks(ListTeamBoardTasksRequest) returns (ListTeamBoardTasksResponse); // only tasks in projects the caller can reach
+  rpc MoveTeamBoardCard(MoveTeamBoardCardRequest) returns (Task);                  // to a column: the task's own project decides the status
+
   // ── Labels (any project member) ──
   rpc CreateLabel(CreateLabelRequest) returns (Label);
   rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse);
@@ -1087,17 +1096,19 @@ message Sprint {
   optional google.protobuf.Timestamp completed_at = 9;
   google.protobuf.Timestamp created_at = 10;
   string board_id = 11;   // the board that owns it; one sprint is ACTIVE per board, not per project
+  // project_id is empty for a sprint owned by a team board.
 }
 
 message CreateSprintRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
-  string project_id = 2;
+  string project_id = 2;      // empty for a sprint on a team board — then board_id is required
   string name = 3;
   optional string goal = 4;
   optional string start_date = 5;
   optional string end_date = 6;
   // The board that will own it. Absent = the project's default board. Must be a board that owns sprints.
+  // A team board's id makes a cross-project sprint (project_id empty).
   optional string board_id = 7;
 }
 
@@ -1114,7 +1125,7 @@ message UpdateSprintRequest {
 message ListSprintsRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
-  string project_id = 2;
+  string project_id = 2;          // empty when listing a team board's sprints
   optional string board_id = 3;   // only this board's sprints; absent = every sprint in the project
 }
 
@@ -2229,4 +2240,90 @@ message ImportTaskComment {
 message FinishProjectImportRequest {
   string org_id = 1;
   string project_id = 2;
+}
+
+
+// ───────────────────────── Team boards ─────────────────────────
+
+message StringList {
+  repeated string values = 1;
+}
+
+message TeamBoardProject {
+  string id = 1;
+  string key = 2;
+  string name = 3;
+}
+
+message TeamBoardColumn {
+  string id = 1;                    // empty when creating a column
+  string name = 2;
+  string status_group = 3;          // TODO | IN_PROGRESS | DONE, or empty for a custom column
+  repeated string status_ids = 4;   // statuses (of any included project) shown in this column
+}
+
+message TeamBoardColumns {
+  repeated TeamBoardColumn columns = 1;   // in display order
+}
+
+message TeamBoard {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;
+  string scope = 4;                              // JSON, as Board.scope: which tasks of the projects are on it
+  // Only the included projects the caller can reach — the rest are counted, never named.
+  repeated TeamBoardProject projects = 5;
+  int32 hidden_project_count = 6;
+  repeated TeamBoardColumn columns = 7;
+  repeated string admin_ids = 8;
+  bool can_manage = 9;                           // the caller is a board admin
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message CreateTeamBoardRequest {
+  string org_id = 1;
+  string name = 2;
+  string scope = 3;                  // optional JSON; defaults to "{}"
+  repeated string project_ids = 4;   // at least one
+}
+
+message ListTeamBoardsRequest {
+  string org_id = 1;
+}
+
+message ListTeamBoardsResponse {
+  repeated TeamBoard boards = 1;
+}
+
+message GetTeamBoardRequest {
+  string board_id = 1;
+}
+
+message UpdateTeamBoardRequest {
+  string board_id = 1;
+  optional string name = 2;
+  optional string scope = 3;
+  optional StringList project_ids = 4;     // replaces the set
+  optional TeamBoardColumns columns = 5;   // replaces the columns (ids kept for those given)
+  optional StringList admin_ids = 6;       // replaces the admin list; never leaves it empty
+}
+
+message DeleteTeamBoardRequest {
+  string board_id = 1;
+}
+
+message ListTeamBoardTasksRequest {
+  string board_id = 1;
+}
+
+message ListTeamBoardTasksResponse {
+  repeated Task tasks = 1;
+  // Tasks on the board in projects the caller can't reach: a number, never titles.
+  int32 hidden_count = 2;
+}
+
+message MoveTeamBoardCardRequest {
+  string board_id = 1;
+  string task_id = 2;
+  string column_id = 3;
 }
