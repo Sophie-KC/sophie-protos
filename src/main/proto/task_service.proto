@@ -983,6 +983,7 @@ message ListTasksRequest {
   optional string updated_to = 20;
   optional string created_from = 21;
   optional string created_to = 22;
+  optional string time_zone = 23;     // IANA zone the windows above are cut in; empty = UTC
 }
 
 enum ArchiveFilter {
@@ -1743,6 +1744,7 @@ message MetricJson {
 // Project Summary (design_handoff_summary §7): every block from ONE read, so the numbers agree with each other.
 message GetProjectSummaryRequest {
   string project_id = 1;
+  string time_zone = 2;         // IANA zone days are cut in; empty = UTC
 }
 
 message ListProjectActivityRequest {
@@ -1750,6 +1752,7 @@ message ListProjectActivityRequest {
   optional string since = 2;    // yyyy-MM-dd (org time zone); default = the last 7 days
   optional string cursor = 3;   // opaque, echoed back from the previous page
   optional int32 limit = 4;     // default 25, at most 100
+  string time_zone = 5;         // IANA zone days are cut in; empty = UTC
 }
 
 message GetProjectAnalyticsSettingsRequest {
