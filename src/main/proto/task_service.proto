@@ -984,6 +984,10 @@ message ListTasksRequest {
   optional string created_from = 21;
   optional string created_to = 22;
   optional string time_zone = 23;     // IANA zone the windows above are cut in; empty = UTC
+  // Leave each task's description (rich-text JSON, often the bulk of a task) out of the response — a board
+  // or list only shows titles and fields, and the open task fetches itself with GetTask. Default false:
+  // every existing caller still gets descriptions.
+  bool omit_description = 24;
 }
 
 enum ArchiveFilter {
