@@ -125,6 +125,7 @@ service TaskService {
   rpc SetTaskInitiative(SetTaskInitiativeRequest) returns (Task);               // access to the epic AND the initiative; null clears
   rpc GetInitiativeRollup(GetInitiativeRollupRequest) returns (InitiativeRollup); // computed with the caller's access
   rpc ListInitiatives(ListInitiativesRequest) returns (ListInitiativesResponse);  // the ones the caller can reach, summarised
+  rpc ListLinkableEpics(ListLinkableEpicsRequest) returns (ListLinkableEpicsResponse); // epics the caller could add to an initiative
   rpc RankTask(RankTaskRequest) returns (Task);                       // manual backlog reorder
 
   // ── Scrum sprints ──
@@ -250,6 +251,8 @@ service TaskService {
   rpc GetOrgAnalyticsDefaults(GetOrgAnalyticsDefaultsRequest) returns (OrgAnalyticsDefaults);  // org member
   rpc UpdateOrgAnalyticsDefaults(UpdateOrgAnalyticsDefaultsRequest) returns (OrgAnalyticsDefaults); // org admin
   rpc ListMetricPresets(ListMetricPresetsRequest) returns (MetricJson);                        // org member
+  rpc GetProjectSummary(GetProjectSummaryRequest) returns (MetricJson);                        // project member; one read, the caller's own view
+  rpc ListProjectActivity(ListProjectActivityRequest) returns (MetricJson);                    // project member; events on items the caller can open
 
   // ── Dashboards: saved dashboards and each project's Reports dashboard (claude/dashboards-design.md §9) ──
   // Visibility PRIVATE | ORG | SHARED | PROJECT. An unseen dashboard is NOT_FOUND; seeing one grants nothing
@@ -973,6 +976,13 @@ message ListTasksRequest {
   SortDirection sort_direction = 15;
   // Default (unspecified) leaves archived tasks out, which is what every existing view expects.
   ArchiveFilter archived = 16;
+  // Calendar-day windows (yyyy-MM-dd, inclusive, in the org's time zone) — what a Project Summary number counts:
+  optional string done_from = 17;     // entered a DONE status in the window and is still done
+  optional string done_to = 18;
+  optional string updated_from = 19;  // any change in the window: a field, status, assignee, comment, attachment or link
+  optional string updated_to = 20;
+  optional string created_from = 21;
+  optional string created_to = 22;
 }
 
 enum ArchiveFilter {
@@ -1730,6 +1740,18 @@ message MetricJson {
   string json = 1;
 }
 
+// Project Summary (design_handoff_summary §7): every block from ONE read, so the numbers agree with each other.
+message GetProjectSummaryRequest {
+  string project_id = 1;
+}
+
+message ListProjectActivityRequest {
+  string project_id = 1;
+  optional string since = 2;    // yyyy-MM-dd (org time zone); default = the last 7 days
+  optional string cursor = 3;   // opaque, echoed back from the previous page
+  optional int32 limit = 4;     // default 25, at most 100
+}
+
 message GetProjectAnalyticsSettingsRequest {
   string project_id = 1;
 }
@@ -2292,6 +2314,9 @@ message TeamBoardColumn {
   string name = 2;
   string status_group = 3;          // TODO | IN_PROGRESS | DONE, or empty for a custom column
   repeated string status_ids = 4;   // statuses (of any included project) shown in this column
+  // The status a dropped card gets, per project that has two or more statuses in this column. Absent for a project =
+  // its first status here in workflow order. Always a subset of status_ids, at most one per project.
+  repeated string landing_status_ids = 5;
 }
 
 message TeamBoardColumns {
@@ -2311,6 +2336,15 @@ message TeamBoard {
   bool can_manage = 9;                           // the caller is a board admin
   google.protobuf.Timestamp created_at = 10;
   optional int32 sprint_length_days = 11;   // as Board.sprint_length_days
+  optional TeamBoardSprintInfo active_sprint = 12;   // the running sprint, absent when none runs
+  int32 card_count = 13;                            // cards of the caller's projects in that sprint (else every task on the board)
+  // Statuses an admin chose to keep off the board on purpose, so the "not on the board" warning stays quiet for them.
+  repeated string kept_off_status_ids = 14;
+}
+
+message TeamBoardSprintInfo {
+  string name = 1;
+  optional string end_date = 2;     // yyyy-MM-dd
 }
 
 message CreateTeamBoardRequest {
@@ -2340,6 +2374,7 @@ message UpdateTeamBoardRequest {
   optional TeamBoardColumns columns = 5;   // replaces the columns (ids kept for those given)
   optional StringList admin_ids = 6;       // replaces the admin list; never leaves it empty
   optional int32 sprint_length_days = 7;   // 1-90; 0 = the default (14)
+  optional StringList kept_off_status_ids = 8;   // replaces the set; each must be a status of the board's projects in no column
 }
 
 message DeleteTeamBoardRequest {
@@ -2399,6 +2434,8 @@ message InitiativeEpic {
   int32 points_done = 11;
   optional string start_date = 12;
   optional string due_date = 13;
+  string status_group = 14;         // the epic's own status group: TODO | IN_PROGRESS | DONE
+  int32 tasks_in_progress = 15;     // of tasks_total, those in an IN_PROGRESS status
 }
 
 // Progress is the caller's own view: epics in projects they can't reach are only counted, and add nothing to the
@@ -2416,10 +2453,36 @@ message InitiativeRollup {
   int32 points_done = 10;
   optional string start_date = 11;  // earliest start among visible epics
   optional string due_date = 12;    // latest due among visible epics
+  bool done = 13;                   // the initiative itself is in a DONE status
 }
 
 message ListInitiativesResponse {
   repeated InitiativeRollup initiatives = 1;
+}
+
+// Epics the caller could add to an initiative: per project they can reach, the live epics and phases not already on it.
+message ListLinkableEpicsRequest {
+  string initiative_id = 1;
+}
+
+message LinkableEpic {
+  string task_id = 1;
+  int32 task_number = 2;
+  string title = 3;
+  string status_group = 4;
+  optional string initiative_id = 5;      // the initiative it is on now: adding it here moves it
+  optional string initiative_title = 6;   // named only when the caller can reach that initiative's project
+}
+
+message LinkableProject {
+  string project_id = 1;
+  string project_key = 2;
+  string project_name = 3;
+  repeated LinkableEpic epics = 4;
+}
+
+message ListLinkableEpicsResponse {
+  repeated LinkableProject projects = 1;
 }
 
 // Place a card between two others in the board's own order (ranks within a project don't compare across projects, so a
