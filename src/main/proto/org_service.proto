@@ -227,6 +227,10 @@ service OrgService {
   // (BatchGetUsers, SearchOrgMembers) needs an id or an org already in hand. Throws NOT_FOUND for no
   // match, same convention as GetOrganizationForStaff.
   rpc LookupUserByEmailForStaff(LookupUserByEmailRequest) returns (UserProfile);
+  // Staff-tier (PLATFORM_ADMIN or SUPPORT). Restricts or un-restricts a user account: a restricted account
+  // is read-only everywhere (its personal API tokens lose their write scopes too). Idempotent; returns the
+  // updated profile. NOT_FOUND for an unknown user, INVALID_ARGUMENT for a missing reason when restricting.
+  rpc SetUserRestrictionForStaff(SetUserRestrictionRequest) returns (UserProfile);
 
   // Staff-tier twin of ListMyOrganizations above, reusing its exact request/response shape — the
   // underlying query (role_assignments by user_id, scope_type='ORG') is already indexed and already
@@ -452,6 +456,10 @@ message ValidateSessionResponse {
   repeated string permissions = 5;
   bool is_org_admin = 6;
   MembershipStatus membership_status = 7;
+  // True when platform staff have restricted this account (SetUserRestrictionForStaff): it keeps signing
+  // in and reading, but the Gateway refuses its writes with 403 ACCOUNT_RESTRICTED. Valid for any
+  // org_id, including empty. Always false for an invalid session.
+  bool restricted = 8;
 }
 
 message CreateOrganizationRequest {
@@ -713,6 +721,17 @@ message UserProfile {
   string avatar_version = 5; // empty = no avatar set, same convention as UserSummary
   string status = 6;         // ACTIVE | DEACTIVATED
   google.protobuf.Timestamp created_at = 7;
+  // Read-only restriction (SetUserRestrictionForStaff). `status` stays ACTIVE while restricted.
+  bool restricted = 8;
+  string restriction_reason = 9;                 // empty when not restricted
+  google.protobuf.Timestamp restricted_at = 10;  // unset when not restricted
+}
+
+message SetUserRestrictionRequest {
+  string user_id = 1;
+  bool restricted = 2;
+  // Why, shown to other staff (not to the user). Required when restricting; ignored when lifting.
+  string reason = 3;
 }
 
 message PlatformStaffMember {
