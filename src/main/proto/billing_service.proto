@@ -219,6 +219,22 @@ message Invoice {
   // reset. Exposed for the admin panel's Metrics dunning funnel ("reminder sent" stage); the column
   // existed on the entity since that job shipped but had no RPC/proto surface until now.
   optional google.protobuf.Timestamp overdue_notified_at = 21;
+  // Payments recorded against this invoice, oldest first. Set ONLY by the staff reads
+  // (BillingAdminService.ListInvoices / GetInvoiceForStaff); empty on every customer-facing path.
+  repeated InvoicePayment payments = 22;
+}
+
+// One row of billing-service's payment table: a staff-recorded bank transfer / manual payment, or a
+// card provider's confirmed payment (Payme, Click).
+message InvoicePayment {
+  string id = 1;
+  string method = 2;                           // BANK_TRANSFER | MANUAL | CARD
+  string status = 3;                           // PENDING | SUCCEEDED | FAILED | REFUNDED
+  string amount = 4;                           // decimal string, invoice currency
+  string currency = 5;
+  string reference = 6;                        // bank payment order number / provider payment id; empty if none
+  string provider = 7;                         // payme | click; empty for a staff-recorded payment
+  optional google.protobuf.Timestamp paid_at = 8;
 }
 
 message InvoiceLine {
