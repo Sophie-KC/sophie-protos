@@ -88,6 +88,10 @@ service OrgService {
   // level as IsOrgMember (not a sensitive org-membership query, just name/email). Missing/unknown/
   // malformed ids are silently omitted from the response, never an error.
   rpc BatchGetUsers(BatchGetUsersRequest) returns (BatchGetUsersResponse);
+  // Trusted-internal. Which of these user ids platform staff have restricted (SetUserRestrictionForStaff).
+  // Drive uses it to stop serving a restricted person's anonymous share links. Unknown and malformed ids are
+  // simply absent from the answer, like BatchGetUsers.
+  rpc ListRestrictedUsers(ListRestrictedUsersRequest) returns (ListRestrictedUsersResponse);
   rpc ListMyOrganizations(ListMyOrganizationsRequest) returns (ListMyOrganizationsResponse);
   rpc UpdateOrganization(UpdateOrganizationRequest) returns (Organization);
   rpc UpdateOrganizationStatus(UpdateOrganizationStatusRequest) returns (Organization);
@@ -681,6 +685,14 @@ message UserSummary {
 
 message BatchGetUsersResponse {
   repeated UserSummary users = 1; // only the ones actually found — missing ids are simply absent, not errors
+}
+
+message ListRestrictedUsersRequest {
+  repeated string user_ids = 1;
+}
+
+message ListRestrictedUsersResponse {
+  repeated string restricted_user_ids = 1; // the subset of user_ids that is currently restricted
 }
 
 message ListMyOrganizationsRequest {
