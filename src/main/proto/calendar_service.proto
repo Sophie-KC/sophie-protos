@@ -142,6 +142,8 @@ message EventView {
   // 'internal' | 'google' — external rows are read-only, synced copies (see ExternalCalendarConnectionView);
   // the native model above is always source='internal'.
   string source = 22;
+  // Navigation v2's "Join": the event's video-call link, pasted by the organizer (any https URL). Empty = none.
+  string conference_url = 23;
 }
 
 message GetExternalEventDetailRequest {
@@ -195,6 +197,7 @@ message EventDetailView {
   optional string occurrence_start_local = 20; // echoes the request when a single occurrence was targeted
   bool   is_cancelled_occurrence = 21;
   bool   is_override_occurrence  = 22;
+  string conference_url          = 23; // see EventView.conference_url
 }
 
 message AttendeeView {
@@ -313,6 +316,7 @@ message CreateEventRequest {
   string color                 = 13;
   repeated AttendeeInput attendees = 14;
   repeated ReminderInput reminders = 15; // empty = resolve default (org -> user -> 10)
+  string conference_url = 16;            // https only; empty = none
 }
 
 message AttendeeInput {
@@ -355,6 +359,7 @@ message UpdateEventRequest {
   string color                              = 15;
   repeated AttendeeInput attendees          = 16;
   repeated ReminderInput reminders          = 17;
+  optional string conference_url            = 18; // absent = unchanged; empty clears; https only
 }
 
 message DeleteEventRequest {

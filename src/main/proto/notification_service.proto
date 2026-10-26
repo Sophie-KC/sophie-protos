@@ -138,6 +138,10 @@ message NotificationTypePref {
   bool enabled_default = 5;
   bool push_default = 6;
   bool locked = 7;                   // `enabled` cannot be switched off
+  // Navigation v2's Email column. Only types in the email allowlist offer it (email_available); off by default.
+  bool email = 8;
+  bool email_default = 9;
+  bool email_available = 10;
 }
 
 message NotificationPrefs {
@@ -153,6 +157,7 @@ message GetMyNotificationPrefsRequest {
 message NotificationTypePrefUpdate {
   optional bool enabled = 1;
   optional bool push = 2;
+  optional bool email = 4;           // ignored for a type without email_available
   bool reset = 3;                    // drop the caller's values: back to the type's defaults
 }
 

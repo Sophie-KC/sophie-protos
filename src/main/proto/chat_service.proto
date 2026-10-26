@@ -96,6 +96,9 @@ service ChatService {
   // Replies to a given thread root, oldest first. Caller must be a member of the root message's
   // conversation.
   rpc ListThreadReplies(ListThreadRepliesRequest) returns (ListThreadRepliesResponse);
+  // Navigation v2's "Threads" (conversation ⋯): every thread in a conversation, most recently replied first. Caller
+  // must be a member. Keyset-paged on (last_reply_at, root id).
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);
   // Idempotent: the same user+emoji twice is a no-op (matches the reactions PK). Caller must be a
   // conversation member. Publishes a live event.
   rpc AddReaction(AddReactionRequest) returns (google.protobuf.Empty);
@@ -130,6 +133,10 @@ service ChatService {
   // forever=true -> muted_until = 'infinity'. Else muted_until must be a future timestamp. Neither set
   // -> unmute (muted_until cleared).
   rpc MuteConversation(MuteConversationRequest) returns (Conversation);
+  // Navigation v2: the caller's notification level for one conversation — ALL (every message notifies, the default),
+  // MENTIONS (only mentions and direct replies to the caller), NONE (nothing; unread counts still move). Independent
+  // of mute, which silences everything for a while.
+  rpc SetConversationNotifyLevel(SetConversationNotifyLevelRequest) returns (Conversation);
   // Sets or clears archived_at. Archiving does not clear pinned_rank — a pinned+archived conversation
   // stays pinned inside the archive view.
   rpc SetConversationArchived(SetConversationArchivedRequest) returns (Conversation);
@@ -262,6 +269,8 @@ message Conversation {
   bool marked_unread = 17;
   optional string last_read_message_id = 18;
   optional string last_read_cursor = 19;           // same opaque keyset codec as Message.cursor
+  // The caller's notification level (SetConversationNotifyLevel): ALL | MENTIONS | NONE. Filled where 14-19 are.
+  string notify_level = 20;
 }
 
 // Deliberately not a full Message: no reactions, no attachments list, no seen-computation beyond the
@@ -544,6 +553,29 @@ message SetConversationPinnedRequest {
 message ReorderPinnedConversationsRequest {
   string org_id = 1;
   repeated string conversation_ids = 2; // full ordered list of the caller's pinned conversations in org_id
+}
+
+message SetConversationNotifyLevelRequest {
+  string conversation_id = 1;
+  string level = 2; // ALL | MENTIONS | NONE
+}
+
+message ListThreadsRequest {
+  string conversation_id = 1;
+  int32 limit = 2;        // 1-50; 0 = 20
+  string cursor = 3;      // opaque; empty = first page
+}
+
+message ThreadSummary {
+  Message root = 1;
+  int32 reply_count = 2;
+  google.protobuf.Timestamp last_reply_at = 3;
+  repeated string participant_ids = 4; // up to 5 repliers, most recent first
+}
+
+message ListThreadsResponse {
+  repeated ThreadSummary threads = 1;
+  string next_cursor = 2;  // empty = no more
 }
 
 message MuteConversationRequest {

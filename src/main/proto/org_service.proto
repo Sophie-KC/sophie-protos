@@ -188,6 +188,9 @@ service OrgService {
   // Member-readable; results are filtered to apps visible to requested_by_user_id (EVERYONE, or
   // RESTRICTED with a matching USER/ROLE subject) and each App carries that user's is_favorite.
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+  // Navigation v2's Add app: fetch a link's page title (and favicon URL) to prefill the name. Any org member. Same
+  // SSRF guard as the health check; at most 256 KB read, 5 s; https/http only. Empty title when none is found.
+  rpc PreviewAppLink(PreviewAppLinkRequest) returns (AppLinkPreview);
 
   // Self-service: any org member may favorite/unfavorite an app they can see.
   rpc ToggleAppFavorite(ToggleAppFavoriteRequest) returns (google.protobuf.Empty);
@@ -558,6 +561,10 @@ message OrgMember {
   string activated_at = 8;   // empty/omitted if still pending
   string avatar_version = 9; // empty = no avatar set; frontend renders the monogram
   string job_title = 10;     // the person's own (UserProfile.job_title); empty = not set
+  // Navigation v2's Members columns: the teams the person belongs to in this org (ids, active teams only), and whether
+  // their org role is a guest role (the same rule the role's own is_guest flag / label uses).
+  repeated string team_ids = 11;
+  bool is_guest = 12;
 }
 
 message ListOrgMembersResponse {
@@ -1167,6 +1174,7 @@ message App {
   bool is_favorite = 16;                 // resolved for requested_by_user_id; only meaningful on ListApps
   string created_by = 17;
   google.protobuf.Timestamp created_at = 18;
+  string color = 19;                     // Navigation v2: a ramp key for the tile; empty = derived from the id
 }
 
 message AppVisibilitySubjectList {
@@ -1200,6 +1208,7 @@ message CreateAppRequest {
   string visibility_type = 12;
   repeated AppVisibilitySubject visibility_subjects = 13;
   repeated string tags = 14;
+  string color = 15;                     // ramp key; empty = none
 }
 
 // Partial update: only fields actually set are changed. visibility_subjects/tags use list wrappers,
@@ -1220,6 +1229,7 @@ message UpdateAppRequest {
   optional string visibility_type = 12;
   optional AppVisibilitySubjectList visibility_subjects = 13;
   optional TagList tags = 14;
+  optional string color = 15;            // present-empty clears
 }
 
 message DeleteAppRequest {
@@ -1749,4 +1759,14 @@ message OrgMemberEmailMatch {
   string user_id = 2;                  // internal users.id
   string display_name = 3;
   string status = 4;                   // ACTIVE | PENDING_ACTIVATION
+}
+
+message PreviewAppLinkRequest {
+  string org_id = 1;
+  string url = 2;
+}
+
+message AppLinkPreview {
+  string title = 1;
+  string favicon_url = 2;
 }
