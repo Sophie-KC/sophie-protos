@@ -67,6 +67,9 @@ service TaskService {
   rpc ListBoards(ListBoardsRequest) returns (ListBoardsResponse);
   rpc UpdateBoard(UpdateBoardRequest) returns (Board);
   rpc DeleteBoard(DeleteBoardRequest) returns (google.protobuf.Empty);
+  // Navigation v2: the project's saved filters in the order the sidebar shows them. Every board of the project must be
+  // listed exactly once; returns them in the new order. Any member who can write to the project may reorder.
+  rpc ReorderBoards(ReorderBoardsRequest) returns (ListBoardsResponse);
 
   // ── Team boards: one board over several projects (teams design §6.3). Org-level, not project-level. ──
   rpc CreateTeamBoard(CreateTeamBoardRequest) returns (TeamBoard);                 // full org member with access to every project chosen
@@ -88,6 +91,9 @@ service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (Task);
   rpc GetTask(GetTaskRequest) returns (Task);
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);        // one query for board + list
+  // Navigation v2's Overview: the tasks assigned to the caller in one org, across every project they can open — not
+  // done, not archived — overdue and soonest-due first. Caller = the verified principal.
+  rpc ListMyTasks(ListMyTasksRequest) returns (ListMyTasksResponse);
   rpc BatchGetTaskSummaries(BatchGetTaskSummariesRequest) returns (BatchGetTaskSummariesResponse); // cross-link enrichment
   rpc GetTaskByReference(GetTaskByReferenceRequest) returns (TaskSummary);                          // resolve KEY-NUMBER → task
   // REMOVED in 0.66.0: ResolveTaskReferenceInternal. Its only consumer, VCS webhook ingestion, moved
@@ -343,6 +349,9 @@ message Project {
   bool is_member = 15;
   // The team that owns new tasks here when neither the task nor its component names one. Absent = none.
   optional string default_team_id = 16;
+  // The project's colour as a ramp key (red, amber, green, teal, blue, violet, plum, moss, slate) — its tile, card mark
+  // and chips. Absent = none chosen; clients fall back to a tint derived from the id.
+  optional string color = 17;
 }
 
 // Wrapper so an update can say "set to this list" (even an empty one) apart from "leave unchanged".
@@ -446,6 +455,7 @@ message UpdateProjectRequest {
   bool clear_default_card_fields = 5;    // true = back to the platform default
   optional string visibility = 6;        // "MEMBERS" | "ORG" (project manager); absent = unchanged
   optional string default_team_id = 7;   // present-empty clears (project manager)
+  optional string color = 8;             // a ramp key (see Project.color); present-empty clears (project manager)
 }
 
 message Component {
@@ -652,6 +662,8 @@ message Board {
   // How many days a new sprint on this board runs when it starts without an end date. Absent = the project's
   // Sprints setting (default 14).
   optional int32 sprint_length_days = 9;
+  // Order in the project's saved-filter list (ReorderBoards); ListBoards returns boards by it, then by creation.
+  int32 position = 10;
 }
 
 message CreateBoardRequest {
@@ -684,10 +696,35 @@ message UpdateBoardRequest {
   optional int32 sprint_length_days = 7;   // 1-90; 0 = back to the project's default
 }
 
+message ReorderBoardsRequest {
+  string project_id = 1;
+  repeated string board_ids = 2; // every board of the project, once, in the new order
+}
+
 message DeleteBoardRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string board_id = 2;
+}
+
+// ===================== My tasks (Overview) =====================
+
+message ListMyTasksRequest {
+  string org_id = 1;
+  int32 limit = 2;               // 1-100; 0 = 50
+}
+
+message MyTask {
+  Task task = 1;
+  string project_key = 2;
+  string project_name = 3;
+  string status_name = 4;
+  string status_group = 5;       // TODO | IN_PROGRESS (done tasks are left out)
+}
+
+message ListMyTasksResponse {
+  repeated MyTask tasks = 1;
+  int32 total = 2;               // how many there are in all, beyond the limit
 }
 
 // ===================== Labels =====================
@@ -2314,6 +2351,7 @@ message TeamBoardProject {
   string id = 1;
   string key = 2;
   string name = 3;
+  string color = 4;                 // the project's ramp key; empty = none chosen (see Project.color)
 }
 
 message TeamBoardColumn {
