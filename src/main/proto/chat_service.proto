@@ -103,6 +103,9 @@ service ChatService {
   // Upserts read_states. Caller must be a conversation member. Not published live — read state is
   // pulled on demand, not pushed.
   rpc MarkAsRead(MarkAsReadRequest) returns (google.protobuf.Empty);
+  // Navigation v2: everyone other than the sender who has read up to this message, earliest first — the "Seen by N"
+  // hover list. Caller must be a conversation member.
+  rpc ListMessageReaders(ListMessageReadersRequest) returns (ListMessageReadersResponse);
   // Message-scoped download authorization: verifies requested_by is a member of the conversation the
   // message belongs to AND that file_id is actually attached to message_id, then returns a fresh
   // short-lived presigned GET URL (obtained from File Service internally). This is the trust boundary
@@ -349,7 +352,7 @@ message Message {
   // message has none yet) and on EditMessage/DeleteMessage's responses (out of scope for this pass).
   repeated MessageReaction reactions = 13;
   // Read receipt for the SENDER's own view: true once at least one OTHER conversation member has
-  // read up to this message (message.created_at <= the latest last_read_at among non-sender members).
+  // read up to this message — their read pointer is at this message or a later one (seen_by_count > 0).
   // Computed per-conversation on the ListMessages/ListThreadReplies read paths; SendMessage's
   // immediate response leaves it false (nothing's been read yet at send time).
   bool seen = 14;
@@ -365,6 +368,11 @@ message Message {
   // the name to show instead of sender_id's, which is then the admin who ran the import. Display only;
   // such a message cannot be edited.
   optional string imported_author_name = 17;
+  // Navigation v2's read receipts: how many members other than the sender have read up to this message, and the
+  // first three of them (earliest readers first). ListMessageReaders gives the full list. Computed on the same read
+  // paths as `seen`; zero/empty elsewhere.
+  int32 seen_by_count = 18;
+  repeated string seen_by_user_ids = 19;
 }
 
 message MessageReaction {
@@ -511,6 +519,19 @@ message RevokeDraftReferencesRequest {
 message MarkAsReadRequest {
   string conversation_id = 1;
   optional string last_read_message_id = 2;
+}
+
+message ListMessageReadersRequest {
+  string message_id = 1;
+}
+
+message MessageReader {
+  string user_id = 1;
+  google.protobuf.Timestamp read_at = 2;   // when they last moved their read pointer
+}
+
+message ListMessageReadersResponse {
+  repeated MessageReader readers = 1;
 }
 
 // ===================== Per-user chat-list state =====================
