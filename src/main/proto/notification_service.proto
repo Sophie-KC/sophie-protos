@@ -94,6 +94,9 @@ message ListMyNotificationsRequest {
   .org.sophie.common.PageRequest page = 2;
   bool unread_only = 4;
   optional string type = 5;
+  // Navigation v2's Mentions: any of these types (e.g. chat.mention, task.mentioned). Combined with `type` when both
+  // are sent; empty = every type.
+  repeated string types = 6;
 }
 
 message ListMyNotificationsResponse {
