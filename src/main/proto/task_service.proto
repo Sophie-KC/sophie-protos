@@ -456,7 +456,8 @@ message UpdateProjectRequest {
   bool clear_default_card_fields = 5;    // true = back to the platform default
   optional string visibility = 6;        // "MEMBERS" | "ORG" (project manager); absent = unchanged
   optional string default_team_id = 7;   // present-empty clears (project manager)
-  optional string color = 8;             // a ramp key (see Project.color); present-empty clears (project manager)  optional bool viewers_can_comment = 9;  // project manager; absent = unchanged
+  optional string color = 8;             // a ramp key (see Project.color); present-empty clears (project manager)
+  optional bool viewers_can_comment = 9;  // project manager; absent = unchanged
 }
 
 message Component {
