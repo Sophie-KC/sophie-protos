@@ -156,6 +156,9 @@ service DocService {
   // Anonymous (no caller identity): NOT_FOUND for an unknown, revoked or expired token, a deleted page, or a page
   // that has never been published.
   rpc ResolvePublicPage(ResolvePublicPageRequest) returns (PublicPageView);
+  // Anonymous, like ResolvePublicPage: a short-lived URL for one attachment of a public page whose link allows
+  // download. NOT_FOUND otherwise.
+  rpc GetPublicPageAttachmentUrl(GetPublicPageAttachmentUrlRequest) returns (GetAttachmentDownloadUrlResponse);
 
   // ── Comments (page-level, one level of replies; require page access) ──
   rpc CreateComment(CreateCommentRequest) returns (PageComment);
@@ -239,6 +242,9 @@ message Space {
   // A Task Service project id; absent = not connected. Not validated against Task Service after it was
   // set — a project deleted later leaves a dangling id that readers treat as "not connected".
   optional string project_id = 13;
+  // Navigation v2: the caller reaches this space only through page grants (not a space member). ListMySpaces now
+  // includes such spaces; their tree shows only the shared branches and can_manage is false.
+  bool shared_only = 14;
 }
 
 // What a page's body actually is. Fixed at creation and never converted — the two kinds have
@@ -1203,4 +1209,18 @@ message PublicPageView {
   string space_name = 6;
   bool allow_download = 7;
   string org_name = 8;
+  // Filled only when allow_download: the page's attachments, downloadable via GetPublicPageAttachmentUrl.
+  repeated PublicPageAttachment attachments = 9;
+}
+
+message PublicPageAttachment {
+  string id = 1;                 // page attachment id
+  string file_name = 2;
+  string mime_type = 3;
+  int64 size_bytes = 4;
+}
+
+message GetPublicPageAttachmentUrlRequest {
+  string token = 1;
+  string attachment_id = 2;
 }
