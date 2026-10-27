@@ -32,6 +32,12 @@ service ChatService {
   // CHANNEL only (rejected for DIRECT). Caller must be OWNER or ADMIN; the OWNER cannot be removed
   // this way — ownership must be transferred first.
   rpc RemoveConversationMember(RemoveConversationMemberRequest) returns (google.protobuf.Empty);
+  // Navigation v2 (gap review): any member leaves a channel or group themself. FAILED_PRECONDITION for a DIRECT
+  // conversation and for the OWNER (transfer ownership first).
+  rpc LeaveConversation(LeaveConversationRequest) returns (google.protobuf.Empty);
+  // Navigation v2: the conversation's attachments, newest first (member only; deleted messages and anything older
+  // than the org's chat history cutoff are left out). Keyset paging like ListThreads.
+  rpc ListConversationFiles(ListConversationFilesRequest) returns (ListConversationFilesResponse);
   // Only the current OWNER may call. Atomically demotes the current OWNER to ADMIN and promotes
   // new_owner_user_id (who must already be a member) to OWNER.
   rpc TransferOwnership(TransferOwnershipRequest) returns (google.protobuf.Empty);
@@ -809,4 +815,26 @@ message ImportPin {
 message FinishConversationImportRequest {
   string org_id = 1;
   string conversation_id = 2;
+}
+
+// ===================== Navigation v2: leave, files =====================
+
+message LeaveConversationRequest { string conversation_id = 1; }
+
+message ListConversationFilesRequest {
+  string conversation_id = 1;
+  int32 limit = 2;                 // <=0 → 30, capped at 100
+  string cursor = 3;
+}
+
+message ConversationFile {
+  MessageAttachment attachment = 1;   // download_url filled like ListMessages
+  string message_id = 2;
+  string sender_id = 3;
+  google.protobuf.Timestamp sent_at = 4;
+}
+
+message ListConversationFilesResponse {
+  repeated ConversationFile files = 1;
+  string next_cursor = 2;          // empty = no more
 }

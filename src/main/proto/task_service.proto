@@ -800,6 +800,7 @@ message Task {
   optional string start_date = 23;       // ISO yyyy-MM-dd; absent = none. Never after due_date.
   // Set = archived: off the board and every list (ListTasks excludes it unless asked), never deleted.
   optional google.protobuf.Timestamp archived_at = 24;
+  optional string archived_by = 28;      // Navigation v2: who archived it (internal user id); absent when not archived or unknown
   // The team that owns this task (an org-service team id; it need not have access to the project). Absent = none.
   optional string team_id = 25;
   // The area/service inside the project this task belongs to. Absent = none.
