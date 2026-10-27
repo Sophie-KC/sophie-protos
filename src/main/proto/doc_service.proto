@@ -87,6 +87,9 @@ service DocService {
   // ── Drafts (per-user autosave; never visible to anyone but the author) ──
   rpc SaveDraft(SaveDraftRequest) returns (google.protobuf.Empty);
   rpc GetMyDraft(GetMyDraftRequest) returns (PageDraft); // has_draft=false when there's nothing to restore
+  // Navigation v2 (private drafts): throw the caller's own draft of a DRAFT-mode page away. A LIVE page's original
+  // has no personal draft (its draft IS the shared live content) → FAILED_PRECONDITION. No draft = no-op.
+  rpc DiscardDraft(DiscardDraftRequest) returns (google.protobuf.Empty);
   rpc ListMyDraftPages(ListMyDraftPagesRequest) returns (ListMyDraftPagesResponse); // pages the caller has an active draft on
 
   // ── Single-editor edit lock (heartbeat-based; expiry checked at acquire time) ──
@@ -655,6 +658,8 @@ message PageDraft {
   string content = 3;                       // JSON; empty when has_draft=false
   google.protobuf.Timestamp updated_at = 4;
   string locale = 5;
+  // Navigation v2: the published version this draft started from (as saved with it); 0 = not recorded.
+  int32 base_version_number = 6;
 }
 
 message EditLock {
@@ -746,6 +751,14 @@ message SaveDraftRequest {
   string page_id = 2;
   string content = 3;
   string locale = 4;                        // "" = the original
+  // Navigation v2: the published version (of this language) the draft started from. Kept with the draft;
+  // 0 = leave what is stored (a new draft then records none).
+  int32 base_version_number = 5;
+}
+
+message DiscardDraftRequest {
+  string page_id = 1;
+  string locale = 2;                        // "" = the original
 }
 
 message GetMyDraftRequest {
@@ -801,6 +814,11 @@ message PublishPageRequest {
   // A stale one is FAILED_PRECONDITION, so a document opened before the language was removed and
   // re-added can't be published into the new one. "" = don't check.
   string collab_generation = 5;
+  // Navigation v2 (private drafts): the version the publisher's draft started from. When > 0 and this
+  // language's current version is newer, the publish is refused with FAILED_PRECONDITION and the message
+  // "page changed since the draft was started" — someone else published meanwhile. 0 = don't check
+  // ("Publish anyway").
+  int32 base_version_number = 6;
 }
 
 message RestorePageVersionRequest {
