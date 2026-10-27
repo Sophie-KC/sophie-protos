@@ -624,6 +624,10 @@ message CheckPageAccessRequest {
   // Translations: the generation the caller's document belongs to (PageLocale.collab_generation);
   // a different live generation is FAILED_PRECONDITION. "" = don't check.
   string collab_generation = 4;
+  // Navigation v2: follow a LIVE page's editing room READ-ONLY (a reader sees edits as they happen and who is
+  // editing). Requires only page VIEW access, and only for a LIVE page's original language — anything else is
+  // FAILED_PRECONDITION. false = today's check (page editor).
+  bool view_only = 5;
 }
 
 // Was google.protobuf.Empty; wire-compatible (both decode from empty bytes), so a caller still on
@@ -632,6 +636,7 @@ message CheckPageAccessRequest {
 message CheckPageAccessResponse {
   string locale = 1;                        // the request's locale, normalized ("" = the original)
   string collab_generation = 2;             // the language's current generation ("" for the original)
+  bool read_only = 3;                       // true when granted with view_only: the ticket must be read-only
 }
 
 message GetCollabStateRequest {
