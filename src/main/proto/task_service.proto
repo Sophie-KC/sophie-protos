@@ -666,6 +666,9 @@ message Board {
   optional int32 sprint_length_days = 9;
   // Order in the project's saved-filter list (ReorderBoards); ListBoards returns boards by it, then by creation.
   int32 position = 10;
+  // Navigation v2 (g-filters-manage): weekday a board's OWN sprints start on, 1 = Monday … 7 = Sunday; 0 = not set
+  // (sprints start whenever they're started, as today).
+  int32 sprint_start_day = 11;
 }
 
 message CreateBoardRequest {
@@ -696,6 +699,7 @@ message UpdateBoardRequest {
   optional bool make_default = 5; // true = make this the project's default board (unsets any other)
   optional string scope = 6;      // see Board.scope. Refused while it would leave a board that owns sprints with none.
   optional int32 sprint_length_days = 7;   // 1-90; 0 = back to the project's default
+  optional int32 sprint_start_day = 8;    // 0-7, see Board.sprint_start_day
 }
 
 message ReorderBoardsRequest {
@@ -2365,6 +2369,9 @@ message TeamBoardColumn {
   // The status a dropped card gets, per project that has two or more statuses in this column. Absent for a project =
   // its first status here in workflow order. Always a subset of status_ids, at most one per project.
   repeated string landing_status_ids = 5;
+  // Navigation v2 (g-board-settings): optional WIP limit (absent = no limit, 1-999) and a colour ramp key ("" = none).
+  optional int32 wip_limit = 6;
+  string color = 7;
 }
 
 message TeamBoardColumns {
@@ -2388,11 +2395,18 @@ message TeamBoard {
   int32 card_count = 13;                            // cards of the caller's projects in that sprint (else every task on the board)
   // Statuses an admin chose to keep off the board on purpose, so the "not on the board" warning stays quiet for them.
   repeated string kept_off_status_ids = 14;
+  // Navigation v2 (g-board-settings › General): OWN (default, "" reads as OWN) = the board plans and runs its own
+  // sprints; NONE = a continuous board with no sprint UI (sprint actions refused with FAILED_PRECONDITION).
+  string sprint_source = 15;
 }
 
 message TeamBoardSprintInfo {
   string name = 1;
   optional string end_date = 2;     // yyyy-MM-dd
+  // Navigation v2 (g-boards): the running sprint's progress over the caller's reachable cards, and its start.
+  int32 done_count = 3;
+  int32 total_count = 4;
+  optional string start_date = 5;   // yyyy-MM-dd
 }
 
 message CreateTeamBoardRequest {
@@ -2423,6 +2437,7 @@ message UpdateTeamBoardRequest {
   optional StringList admin_ids = 6;       // replaces the admin list; never leaves it empty
   optional int32 sprint_length_days = 7;   // 1-90; 0 = the default (14)
   optional StringList kept_off_status_ids = 8;   // replaces the set; each must be a status of the board's projects in no column
+  optional string sprint_source = 9;       // OWN | NONE; NONE refused while a sprint is running
 }
 
 message DeleteTeamBoardRequest {
