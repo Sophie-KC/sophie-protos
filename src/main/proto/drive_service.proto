@@ -107,7 +107,7 @@ message Drive {
 }
 
 message Subject {
-  string type = 1;                    // USER | ROLE
+  string type = 1;                    // USER | ROLE | TEAM (TEAM: Navigation v2; members of the org team, via org-service)
   string id = 2;
 }
 

@@ -127,6 +127,9 @@ service OrgService {
   rpc GetTeam(GetTeamRequest) returns (Team);
   rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
   rpc ListMyTeams(ListMyTeamsRequest) returns (ListTeamsResponse);
+  // Trusted-internal: the active (non-archived) teams a given user is in, in one org. Used by doc-service and
+  // drive-service to resolve TEAM grant subjects. Empty when the user isn't an org member.
+  rpc ListUserTeamIds(ListUserTeamIdsRequest) returns (ListUserTeamIdsResponse);
   // Names for a set of team ids (role-assignment lists, chips). Teams of orgs the caller isn't in are omitted.
   rpc BatchGetTeams(BatchGetTeamsRequest) returns (ListTeamsResponse);
   rpc ListTeamMembers(ListTeamMembersRequest) returns (ListTeamMembersResponse);
@@ -1045,6 +1048,15 @@ message ListMyTeamsRequest {
   string org_id = 1;
 }
 
+message ListUserTeamIdsRequest {
+  string org_id = 1;
+  string user_id = 2;               // internal users.id
+}
+
+message ListUserTeamIdsResponse {
+  repeated string team_ids = 1;
+}
+
 message BatchGetTeamsRequest {
   repeated string team_ids = 1;
 }
@@ -1174,7 +1186,10 @@ message App {
   bool is_favorite = 16;                 // resolved for requested_by_user_id; only meaningful on ListApps
   string created_by = 17;
   google.protobuf.Timestamp created_at = 18;
-  string color = 19;                     // Navigation v2: a ramp key for the tile; empty = derived from the id
+  string color = 19;                     // Navigation v2: a ramp key for the tile; empty = derived from the id  // Health check (Navigation v2 gap review): filled by org-service's poller for apps with a health_check_url.
+  string health_status = 20;                     // "" = never checked / no URL | OK | FAILING
+  google.protobuf.Timestamp health_checked_at = 21;
+  string health_detail = 22;                     // short reason when FAILING, e.g. "HTTP 503" or "timeout"
 }
 
 message AppVisibilitySubjectList {

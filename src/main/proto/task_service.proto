@@ -351,7 +351,8 @@ message Project {
   optional string default_team_id = 16;
   // The project's colour as a ramp key (red, amber, green, teal, blue, violet, plum, moss, slate) — its tile, card mark
   // and chips. Absent = none chosen; clients fall back to a tint derived from the id.
-  optional string color = 17;
+  optional string color = 17;  // Navigation v2 › Members & access: members whose project role can only view may still comment on tasks.
+  bool viewers_can_comment = 18;
 }
 
 // Wrapper so an update can say "set to this list" (even an empty one) apart from "leave unchanged".
@@ -455,7 +456,7 @@ message UpdateProjectRequest {
   bool clear_default_card_fields = 5;    // true = back to the platform default
   optional string visibility = 6;        // "MEMBERS" | "ORG" (project manager); absent = unchanged
   optional string default_team_id = 7;   // present-empty clears (project manager)
-  optional string color = 8;             // a ramp key (see Project.color); present-empty clears (project manager)
+  optional string color = 8;             // a ramp key (see Project.color); present-empty clears (project manager)  optional bool viewers_can_comment = 9;  // project manager; absent = unchanged
 }
 
 message Component {

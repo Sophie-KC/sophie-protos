@@ -140,6 +140,23 @@ service DocService {
   rpc RemovePageRestriction(RemovePageRestrictionRequest) returns (google.protobuf.Empty);
   rpc ListPageRestrictions(ListPageRestrictionsRequest) returns (ListPageRestrictionsResponse);
 
+  // ── Navigation v2 (gap review) ──
+  // Page editor. DRAFT → LIVE: the page's latest content (draft if any, else published) becomes the live content.
+  // LIVE → DRAFT: the current live content is published as a new version first. Returns the page.
+  rpc SetPageEditMode(SetPageEditModeRequest) returns (Page);
+  // Sharing beyond the space (SH1). Grants WIDEN access: a matching grant opens the page (and its descendants) at the
+  // grant's role even for someone outside the space and regardless of restrictions. Viewing = page view access;
+  // changing = page editor (can_share). Owner = the page's creator.
+  rpc GetPageSharing(GetPageSharingRequest) returns (PageSharing);
+  rpc SetPageGrants(SetPageGrantsRequest) returns (PageSharing);           // the complete DIRECT grant set
+  // Public link to the PUBLISHED content of a RICH_TEXT page (DR3 for pages). One live link per page; creating a new
+  // one replaces it. The token is shown once (stored hashed), like Drive's share links.
+  rpc CreatePagePublicLink(CreatePagePublicLinkRequest) returns (CreatePagePublicLinkResponse);
+  rpc RevokePagePublicLink(RevokePagePublicLinkRequest) returns (google.protobuf.Empty);
+  // Anonymous (no caller identity): NOT_FOUND for an unknown, revoked or expired token, a deleted page, or a page
+  // that has never been published.
+  rpc ResolvePublicPage(ResolvePublicPageRequest) returns (PublicPageView);
+
   // ── Comments (page-level, one level of replies; require page access) ──
   rpc CreateComment(CreateCommentRequest) returns (PageComment);
   rpc EditComment(EditCommentRequest) returns (PageComment);       // author only
@@ -252,6 +269,10 @@ message Page {
   // This page's OWN project link; absent = inherits (nearest ancestor with one, else the space's).
   // Inheritance is resolved by the reader from the page tree, never stored on descendants.
   optional string project_id = 12;
+  // Navigation v2 (gap review F1): DRAFT (default; "" reads as DRAFT) = edit a draft, Publish makes a version and
+  // readers see the last published one. LIVE = edits go straight to the page for everyone (the collab checkpoint is
+  // the page's content; History keeps a snapshot version at most every 10 minutes of editing).
+  string edit_mode = 13;
 }
 
 // ===================== Spaces =====================
@@ -763,11 +784,13 @@ message GetHtmlSourceUrlRequest {
 // ===================== Restrictions =====================
 
 message PageRestriction {
+  // Navigation v2: level VIEW (default; "" reads as VIEW) limits who can open the page; EDIT limits who can edit it
+  // (everyone who can view it still can). subject_type gains TEAM.
   // The page the ROW lives on. For an inherited restriction this is the ancestor, not the page that
   // was asked about — which is why inherited_from_page_title exists rather than leaving a client to
   // work out whose restriction it is looking at.
   string page_id = 1;
-  string subject_type = 2; // USER | ROLE
+  string subject_type = 2; // USER | ROLE | TEAM
   string subject_id = 3;
   google.protobuf.Timestamp created_at = 4;
 
@@ -777,15 +800,15 @@ message PageRestriction {
   // "no restrictions" for a page nobody outside a parent's list can open — telling the reader the
   // opposite of the truth, and leaving "why can't my team see this?" unanswerable in the UI.
   // Empty for a restriction the page carries itself.
-  optional string inherited_from_page_title = 5;
+  optional string inherited_from_page_title = 5;  string level = 6;        // VIEW | EDIT
 }
 
 message AddPageRestrictionRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string page_id = 2;
-  string subject_type = 3; // USER | ROLE
-  string subject_id = 4;
+  string subject_type = 3; // USER | ROLE | TEAM
+  string subject_id = 4;  string level = 5;        // VIEW (default) | EDIT
 }
 
 message RemovePageRestrictionRequest {
@@ -793,7 +816,7 @@ message RemovePageRestrictionRequest {
   reserved "requested_by";
   string page_id = 2;
   string subject_type = 3;
-  string subject_id = 4;
+  string subject_id = 4;  string level = 5;        // VIEW (default) | EDIT
 }
 
 message ListPageRestrictionsRequest {
@@ -1103,4 +1126,81 @@ message FinishSpaceImportRequest {
   string org_id = 1;
   string space_id = 2;
   optional string homepage_page_id = 3; // a page of this space
+}
+
+// ===================== Navigation v2: edit mode, sharing, public links =====================
+
+message SetPageEditModeRequest {
+  string page_id = 1;
+  string edit_mode = 2;                    // DRAFT | LIVE
+}
+
+message PageGrant {
+  string subject_type = 1;                 // USER | ROLE | TEAM | ORG (ORG: subject_id empty = everyone in the org)
+  string subject_id = 2;
+  string role = 3;                         // VIEWER | COMMENTER | EDITOR
+  string granted_by = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // Set when the grant is on an ANCESTOR page (inherited, read-only here).
+  string inherited_from_page_id = 6;
+  string inherited_from_page_title = 7;
+}
+
+message PagePublicLink {
+  string id = 1;
+  bool allow_download = 2;                 // attachments downloadable from the public view
+  google.protobuf.Timestamp expires_at = 3;   // unset = never
+  string created_by = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message PageSharing {
+  string page_id = 1;
+  string space_id = 2;
+  string space_name = 3;
+  string owner_id = 4;                     // the page's creator
+  repeated PageGrant grants = 5;           // direct + inherited
+  PagePublicLink link = 6;                 // unset = no live link
+  bool can_share = 7;                      // caller may change grants / links (page editor)
+  bool public_links_allowed = 8;           // RICH_TEXT page that has been published at least once
+}
+
+message GetPageSharingRequest { string page_id = 1; }
+
+message PageGrantSpec {
+  string subject_type = 1;                 // USER | ROLE | TEAM | ORG
+  string subject_id = 2;
+  string role = 3;                         // VIEWER | COMMENTER | EDITOR
+}
+
+message SetPageGrantsRequest {
+  string page_id = 1;
+  repeated PageGrantSpec grants = 2;
+  bool notify = 3;                         // notify newly added USER subjects (docs.shared)
+}
+
+message CreatePagePublicLinkRequest {
+  string page_id = 1;
+  google.protobuf.Timestamp expires_at = 2;   // unset = never
+  bool allow_download = 3;
+}
+
+message CreatePagePublicLinkResponse {
+  PagePublicLink link = 1;
+  string token = 2;                        // shown once; the gateway turns it into the public URL
+}
+
+message RevokePagePublicLinkRequest { string page_id = 1; }
+
+message ResolvePublicPageRequest { string token = 1; }
+
+message PublicPageView {
+  string page_id = 1;
+  string title = 2;
+  string content_json = 3;                 // the latest PUBLISHED version's content
+  int32 version_number = 4;
+  google.protobuf.Timestamp published_at = 5;
+  string space_name = 6;
+  bool allow_download = 7;
+  string org_name = 8;
 }

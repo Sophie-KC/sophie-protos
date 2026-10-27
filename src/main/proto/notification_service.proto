@@ -142,6 +142,10 @@ message NotificationTypePref {
   bool email = 8;
   bool email_default = 9;
   bool email_available = 10;
+  // Navigation v2 (gap review): the bell is its own channel. false = the notification is still created and still
+  // drives push / email / Telegram, but it is left out of the bell list, the unread count and the in-app toast.
+  bool in_app = 11;
+  bool in_app_default = 12;
 }
 
 message NotificationPrefs {
@@ -158,6 +162,7 @@ message NotificationTypePrefUpdate {
   optional bool enabled = 1;
   optional bool push = 2;
   optional bool email = 4;           // ignored for a type without email_available
+  optional bool in_app = 5;
   bool reset = 3;                    // drop the caller's values: back to the type's defaults
 }
 
