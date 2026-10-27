@@ -27,6 +27,9 @@ service DocService {
   rpc DeleteSpace(DeleteSpaceRequest) returns (google.protobuf.Empty);      // soft-delete + cascade pages
   rpc UpdateSpace(UpdateSpaceRequest) returns (Space);                      // partial: name/description/icon
   rpc RestoreSpace(RestoreSpaceRequest) returns (Space);                    // un-archive + reverse page cascade
+  // Navigation v2 (space management): "Delete forever" — an ARCHIVED space and everything in it, for good.
+  // Manager only (creator / space admin / space.manage); a live space is refused (archive it first).
+  rpc PurgeSpace(PurgeSpaceRequest) returns (google.protobuf.Empty);
   rpc SetSpaceHomepage(SetSpaceHomepageRequest) returns (Space);            // page_id must belong to space; empty clears
   // The Tasks project this space's pages belong to by default (optional). Space managers only.
   rpc SetSpaceProject(SetSpaceProjectRequest) returns (Space);              // empty project_id clears
@@ -245,6 +248,30 @@ message Space {
   // Navigation v2: the caller reaches this space only through page grants (not a space member). ListMySpaces now
   // includes such spaces; their tree shows only the shared branches and can_manage is false.
   bool shared_only = 14;
+
+  // ---- Navigation v2: space management (g-f-spaces / g-f-space-settings / g-f-space-members) ----
+  // The picture: LETTER (the name's first letters on a colour), SYMBOL (an icon id on a colour) or UPLOAD
+  // (the image avatar, avatar_version). Replaces the emoji icon, which is no longer written or read.
+  string picture_kind = 15;
+  // One of the six picture colours: teal | blue | violet | orange | rose | moss. Empty = not chosen
+  // (clients derive one from the id).
+  string picture_color = 16;
+  // A Lucide icon id (kebab case) when picture_kind = SYMBOL; empty otherwise.
+  string picture_symbol = 17;
+  // Who can open the space: MEMBERS (people and teams given a space role — private, the lock in lists) or
+  // ORG (every full member of the org, guests excepted, with default_role; members keep their own role
+  // when it is stronger).
+  string open_to = 18;
+  // The role everyone else gets when open_to = ORG: VIEWER | COMMENTER | EDITOR. Kept while MEMBERS.
+  string default_role = 19;
+  // The caller's effective space role: ADMIN | EDITOR | COMMENTER | VIEWER; empty when they reach the space
+  // only through page grants (shared_only).
+  string my_role = 20;
+  // Filled only by ListMySpaces with include_stats (the All spaces page); zero / absent otherwise.
+  int32 page_count = 21;                         // live pages in the space
+  google.protobuf.Timestamp updated_at = 22;     // the latest change to any page in it; absent = none yet
+  int32 member_count = 23;                       // people and teams holding a space role
+  repeated string member_preview_user_ids = 24;  // the first few of those people, for the avatar stack
 }
 
 // What a page's body actually is. Fixed at creation and never converted — the two kinds have
@@ -290,6 +317,13 @@ message CreateSpaceRequest {
   string key = 3;          // unique per org
   string name = 4;
   string description = 5;  // optional
+  // Navigation v2 (g-f-space-new). All optional: empty picture_kind = LETTER, empty open_to = MEMBERS (what
+  // every space was before), empty default_role = VIEWER.
+  string picture_kind = 6;
+  string picture_color = 7;
+  string picture_symbol = 8;
+  string open_to = 9;
+  string default_role = 10;
 }
 
 message GetSpaceRequest {
@@ -303,6 +337,9 @@ message ListMySpacesRequest {
   reserved "requested_by";
   string org_id = 2;
   bool include_archived = 3; // default false = active spaces only (unchanged for existing callers)
+  // Navigation v2: also fill page_count, updated_at, member_count and member_preview_user_ids. Costs a
+  // query and an Org Service call per space, so only the All spaces page asks.
+  bool include_stats = 4;
 }
 
 message ListMySpacesResponse {
@@ -320,16 +357,28 @@ message UpdateSpaceRequest {
   reserved "requested_by";
   string space_id = 2;
   // Partial update: each field is optional — absent = leave unchanged. A present empty description/icon
-  // clears it to null. (key is intentionally NOT updatable — it's embedded in every page URL.)
+  // clears it to null.
   optional string name = 3;
   optional string description = 4;
-  optional string icon = 5;
+  optional string icon = 5; // retired by Navigation v2's picture; still accepted, no longer shown
+  // Navigation v2: the key is editable (unique in the org, same rules as at create). Page links carry it, so
+  // clients resolve a stale /docs/OLDKEY/<pageId> link through the page id.
+  optional string key = 6;
+  optional string picture_kind = 7;
+  optional string picture_color = 8;
+  optional string picture_symbol = 9;
+  optional string open_to = 10;
+  optional string default_role = 11;
 }
 
 message RestoreSpaceRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string space_id = 2;
+}
+
+message PurgeSpaceRequest {
+  string space_id = 1;
 }
 
 // project_org_id: the org the project belongs to, as the caller (the gateway) read it from Task

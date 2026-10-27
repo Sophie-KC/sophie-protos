@@ -622,6 +622,10 @@ message HasScopeAccessRequest {
 
 message HasScopeAccessResponse {
   bool has_access = 1;
+  // Navigation v2 (space roles): holds the scope's system role (e.g. "Space Admin"), directly or through a team.
+  bool is_admin = 2;
+  // The permission keys of every role the user holds at this scope, directly or through a team (union).
+  repeated string permission_keys = 3;
 }
 
 message ListScopeMembersRequest {
