@@ -1600,6 +1600,9 @@ message ListMyOpenTasksResponse {
 //   task.time_reminder — opt-in (off by default): a working day's evening, to someone with open work in a
 //                     time-tracking project who has logged nothing that day and has no timer running.
 //                     Payload TimeReminderPayload, source reference WeeklyDigestSourceReference (org only).
+//   task.daily_brief — opt-in (off by default): weekday mornings (Mon–Fri from 09:00 in tasks.digest.zone),
+//                     per org, the recipient's own open work that needs them today. Payload DailyBriefPayload,
+//                     source reference DailyBriefSourceReference. Not sent when every count is zero.
 // None is sent to the actor themself.
 
 message TaskNotificationSourceReference {
@@ -1656,6 +1659,41 @@ message TimeReminderPayload {
   string date = 1;                            // ISO yyyy-MM-dd in the reminder's zone
   int32 open_tasks = 2;                       // open tasks assigned to the recipient in time-tracking projects
   string project_name = 3;                    // one of them, for the text
+}
+
+message DailyBriefSourceReference {
+  string org_id = 1;
+  string date = 2;                            // ISO yyyy-MM-dd, the brief's day in its zone
+}
+
+// The recipient's own open work in one org (assignee = them, not done, projects they can still reach). Counts
+// overlap: a task both overdue and stuck counts in both. Each line carries only its most urgent reason.
+message DailyBriefPayload {
+  string date = 1;                            // ISO yyyy-MM-dd in time_zone
+  string time_zone = 2;                       // e.g. Asia/Tashkent
+  int32 overdue = 3;                          // due date before today
+  int32 due_today = 4;                        // due date today
+  int32 stuck = 5;                            // status group IN_PROGRESS, not updated for 5+ days
+  int32 blocking = 6;                         // blocks an open task not assigned to the recipient
+  repeated DailyBriefTask tasks = 7;          // most urgent first (overdue, due today, blocking, stuck), at most 5
+}
+
+message DailyBriefTask {
+  string task_id = 1;
+  string project_id = 2;
+  string project_key = 3;
+  int32 task_number = 4;
+  string title = 5;
+  string due_date = 6;                        // ISO yyyy-MM-dd, empty when none
+  DailyBriefReason reason = 7;
+}
+
+enum DailyBriefReason {
+  DAILY_BRIEF_REASON_UNSPECIFIED = 0;
+  OVERDUE = 1;
+  DUE_TODAY = 2;
+  BLOCKING = 3;
+  STUCK = 4;
 }
 
 // ── Project templates + features ──
