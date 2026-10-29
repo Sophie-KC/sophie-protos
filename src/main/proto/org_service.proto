@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "common/pagination.proto";
 import "common/export.proto";
+import "common/agent_via.proto";
 
 service OrgService {
   // Org export (claude/account-deletion-export-design.md §10), SERVICE tier, called by file-service only:
@@ -313,6 +314,9 @@ service OrgService {
   // Withdraws the consent, which also ends that app's offline (long-lived) sessions, so its refresh token stops
   // working. An access token it already holds lives out its few minutes. Unknown or not-the-caller's = NOT_FOUND.
   rpc RevokeConnectedApp(RevokeConnectedAppRequest) returns (google.protobuf.Empty);
+  // What an AI app is, by its client id: for api-gateway to label an agent's actions "via Claude". Only
+  // dynamically registered AI apps resolve; anything else is NOT_FOUND. Kind and name are not secret.
+  rpc DescribeAgentApp(DescribeAgentAppRequest) returns (.org.sophie.common.AgentVia);
 
   // ── Preferences (claude/preferences-design.md §10–11) ────────────────────────────────────────────
   // A preference key (registry in org-service; e.g. appearance.theme, locale.language) resolves through
@@ -1444,6 +1448,10 @@ message ListMyConnectedAppsResponse {
 }
 
 message RevokeConnectedAppRequest {
+  string client_id = 1;
+}
+
+message DescribeAgentAppRequest {
   string client_id = 1;
 }
 

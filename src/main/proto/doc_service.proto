@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "common/pagination.proto";
 import "common/export.proto";
+import "common/agent_via.proto";
 
 // Doc Service: Confluence-style spaces + page hierarchy. gRPC-only, internal (called behind the
 // Gateway, which forwards the acting user's internal id as `requested_by`). Space access is resolved
@@ -929,6 +930,7 @@ message PageComment {
   optional string anchor_mark_id = 9;
   optional string anchor_excerpt = 10;
   string locale = 11;                         // "" = the original
+  optional .org.sophie.common.AgentVia via = 12; // written by an AI app for the author (MCP)
 }
 
 message CreateCommentRequest {

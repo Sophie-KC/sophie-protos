@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package org.sophie.common;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.common.grpc";
+
+// "via Claude" (claude/mcp-design.md §6): an AI app acted for the person. Stored on what the action produced (a
+// comment, an activity entry) when it happens, so history shows it without any later lookup. The person is still the
+// author/actor; this says which app they let act.
+message AgentVia {
+  // What the app really is, from where it may return after sign-in: claude, chatgpt, vscode, local, other.
+  string kind = 1;
+  // What the app registered as its name, e.g. "Claude Code" — self-declared, so shown next to `kind`, never alone.
+  string name = 2;
+}

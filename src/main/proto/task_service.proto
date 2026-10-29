@@ -7,6 +7,7 @@ option java_package = "org.sophie.taskservice.grpc";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "common/agent_via.proto";
 import "common/pagination.proto";
 import "common/export.proto";
 
@@ -1099,6 +1100,7 @@ message TaskComment {
   google.protobuf.Timestamp created_at = 6;
   optional google.protobuf.Timestamp edited_at = 7;
   optional google.protobuf.Timestamp deleted_at = 8; // presence = soft-deleted (content blanked)
+  optional .org.sophie.common.AgentVia via = 9;       // written by an AI app for the author (MCP)
 }
 
 message CreateTaskCommentRequest {
