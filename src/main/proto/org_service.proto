@@ -317,6 +317,14 @@ service OrgService {
   // What an AI app is, by its client id: for api-gateway to label an agent's actions "via Claude". Only
   // dynamically registered AI apps resolve; anything else is NOT_FOUND. Kind and name are not secret.
   rpc DescribeAgentApp(DescribeAgentAppRequest) returns (.org.sophie.common.AgentVia);
+  // Org admins' view of AI apps (claude/mcp-design.md §9). api-gateway reports each agent call's (org, app) for the
+  // CALLER, debounced on its side; org-service records first/last use and answers whether an org admin has blocked
+  // that app for this member in this org.
+  rpc CheckAgentUse(CheckAgentUseRequest) returns (CheckAgentUseResponse);
+  // Org Admin only: every member's AI apps in this org, newest use first.
+  rpc ListOrgAgentConnections(ListOrgAgentConnectionsRequest) returns (ListOrgAgentConnectionsResponse);
+  // Org Admin only: block (or allow again) one member's use of one AI app in this org. NOT_FOUND if never used here.
+  rpc SetOrgAgentConnectionBlocked(SetOrgAgentConnectionBlockedRequest) returns (OrgAgentConnection);
 
   // ── Preferences (claude/preferences-design.md §10–11) ────────────────────────────────────────────
   // A preference key (registry in org-service; e.g. appearance.theme, locale.language) resolves through
@@ -1453,6 +1461,44 @@ message RevokeConnectedAppRequest {
 
 message DescribeAgentAppRequest {
   string client_id = 1;
+}
+
+message CheckAgentUseRequest {
+  string org_id = 1;
+  string client_id = 2;   // the AI app's Keycloak client id
+  string kind = 3;        // as DescribeAgentApp answered, stored for the admin list
+  string name = 4;
+}
+
+message CheckAgentUseResponse {
+  bool allowed = 1;       // false: an org admin blocked this app for the caller in this org
+}
+
+message OrgAgentConnection {
+  string user_id = 1;
+  string client_id = 2;
+  string kind = 3;        // claude | chatgpt | vscode | local | other
+  string name = 4;        // the app's registered name: its own claim
+  google.protobuf.Timestamp first_used_at = 5;
+  google.protobuf.Timestamp last_used_at = 6;
+  bool blocked = 7;
+  optional google.protobuf.Timestamp blocked_at = 8;
+  optional string blocked_by = 9;
+}
+
+message ListOrgAgentConnectionsRequest {
+  string org_id = 1;
+}
+
+message ListOrgAgentConnectionsResponse {
+  repeated OrgAgentConnection connections = 1;
+}
+
+message SetOrgAgentConnectionBlockedRequest {
+  string org_id = 1;
+  string user_id = 2;
+  string client_id = 3;
+  bool blocked = 4;
 }
 
 // ===================== Preferences =====================
