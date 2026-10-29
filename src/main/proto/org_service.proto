@@ -306,6 +306,14 @@ service OrgService {
   // Called fire-and-forget by api-gateway when it mints a WebSocket ticket carrying a device id.
   rpc TouchDevice(TouchDeviceRequest) returns (google.protobuf.Empty);
 
+  // Connected AI apps (claude/mcp-design.md §9): the AI apps (MCP clients such as Claude or ChatGPT) the caller has
+  // let use their account — their Keycloak consents to dynamically registered clients. Same identity rule as the
+  // device RPCs: always the caller (SophieSecurityContext), never a request field.
+  rpc ListMyConnectedApps(ListMyConnectedAppsRequest) returns (ListMyConnectedAppsResponse);
+  // Withdraws the consent, which also ends that app's offline (long-lived) sessions, so its refresh token stops
+  // working. An access token it already holds lives out its few minutes. Unknown or not-the-caller's = NOT_FOUND.
+  rpc RevokeConnectedApp(RevokeConnectedAppRequest) returns (google.protobuf.Empty);
+
   // ── Preferences (claude/preferences-design.md §10–11) ────────────────────────────────────────────
   // A preference key (registry in org-service; e.g. appearance.theme, locale.language) resolves through
   // layers, most specific first: DEVICE (this device in this org) > MEMBER (this org) > USER (all the
@@ -1414,6 +1422,29 @@ message RevokeDeviceRequest {
 
 message TouchDeviceRequest {
   string device_id = 1;
+}
+
+message ListMyConnectedAppsRequest {}
+
+message ConnectedApp {
+  // The Keycloak client id (what RevokeConnectedApp takes).
+  string client_id = 1;
+  // What the app registered as its name, e.g. "Claude Code". Self-declared by the app; shown next to `kind`.
+  string name = 2;
+  // Who the app really is, from where it is allowed to return after sign-in: claude, chatgpt, vscode, local, other.
+  string kind = 3;
+  // The access granted on the consent screen, e.g. tasks:read, docs:write.
+  repeated string scopes = 4;
+  google.protobuf.Timestamp connected_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message ListMyConnectedAppsResponse {
+  repeated ConnectedApp apps = 1;
+}
+
+message RevokeConnectedAppRequest {
+  string client_id = 1;
 }
 
 // ===================== Preferences =====================
