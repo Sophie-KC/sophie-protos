@@ -676,8 +676,9 @@ message CheckPageAccessRequest {
   reserved "requested_by";
   string page_id = 2;
   string locale = 3;                        // "" = the original; else must be a live language version
-  // Translations: the generation the caller's document belongs to (PageLocale.collab_generation);
-  // a different live generation is FAILED_PRECONDITION. "" = don't check.
+  // The generation the caller's document belongs to (a translation's PageLocale.collab_generation; the
+  // original's changes when its content is replaced from outside the editor: an AI app's publish, a
+  // restore). A different live generation is FAILED_PRECONDITION. "" = don't check.
   string collab_generation = 4;
   // Navigation v2: follow a LIVE page's editing room READ-ONLY (a reader sees edits as they happen and who is
   // editing). Requires only page VIEW access, and only for a LIVE page's original language — anything else is
@@ -690,7 +691,7 @@ message CheckPageAccessRequest {
 // or "EN"/"en" (or " "/"") would open separate rooms for one language version.
 message CheckPageAccessResponse {
   string locale = 1;                        // the request's locale, normalized ("" = the original)
-  string collab_generation = 2;             // the language's current generation ("" for the original)
+  string collab_generation = 2;             // the language's current generation ("" for an original never replaced from outside the editor)
   bool read_only = 3;                       // true when granted with view_only: the ticket must be read-only
 }
 
@@ -755,6 +756,10 @@ message SaveDraftRequest {
   // Navigation v2: the published version (of this language) the draft started from. Kept with the draft;
   // 0 = leave what is stored (a new draft then records none).
   int32 base_version_number = 5;
+  // A LIVE page's autosave: the generation the editor's document belongs to (see CheckPageAccessRequest). A
+  // stale one is FAILED_PRECONDITION, so an editor opened before the page was replaced from outside it can't
+  // write its old document over what readers now see. "" = don't check.
+  string collab_generation = 6;
 }
 
 message DiscardDraftRequest {
@@ -811,9 +816,9 @@ message PublishPageRequest {
   string page_id = 2;
   string content = 3;
   string locale = 4;                        // "" = the original
-  // Translations: the generation the publishing editor's document belongs to (PageLocale.collab_generation).
-  // A stale one is FAILED_PRECONDITION, so a document opened before the language was removed and
-  // re-added can't be published into the new one. "" = don't check.
+  // The generation the publishing editor's document belongs to (see CheckPageAccessRequest). A stale one is
+  // FAILED_PRECONDITION, so a document opened before the language was removed and re-added, or before the
+  // page was replaced from outside the editor, can't be published over the new content. "" = don't check.
   string collab_generation = 5;
   // Navigation v2 (private drafts): the version the publisher's draft started from. When > 0 and this
   // language's current version is newer, the publish is refused with FAILED_PRECONDITION and the message
