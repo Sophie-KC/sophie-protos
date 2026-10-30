@@ -321,6 +321,9 @@ service OrgService {
   // CALLER, debounced on its side; org-service records first/last use and answers whether an org admin has blocked
   // that app for this member in this org.
   rpc CheckAgentUse(CheckAgentUseRequest) returns (CheckAgentUseResponse);
+  // The MCP scopes the CALLER's role in org_id allows an AI app or API token (claude/mcp-design.md §16): what the
+  // API-token form offers, and the ceiling org-service applies to tokens. Empty when not an active member.
+  rpc GetMyAgentScopes(GetMyAgentScopesRequest) returns (GetMyAgentScopesResponse);
   // Org Admin only: every member's AI apps in this org, newest use first.
   rpc ListOrgAgentConnections(ListOrgAgentConnectionsRequest) returns (ListOrgAgentConnectionsResponse);
   // Org Admin only: block (or allow again) one member's use of one AI app in this org. NOT_FOUND if never used here.
@@ -1343,7 +1346,9 @@ message CreateApiTokenRequest {
   // no "whose" to ask the client for).
   string org_id = 1;
   string name = 2;
-  repeated string scopes = 3;   // "task:create", "doc:create" today; a set, not a fixed enum
+  // The MCP scopes (tasks:read, tasks:write, docs:read, docs:write, projects:admin) or the legacy task:create /
+  // doc:create. Unknown scopes and scopes beyond the caller's role (GetMyAgentScopes) are INVALID_ARGUMENT.
+  repeated string scopes = 3;
   optional string expires_at = 4; // ISO-8601 instant; unset = no expiry
 }
 
@@ -1388,6 +1393,9 @@ message ValidateApiTokenResponse {
   repeated string scopes = 4;
   repeated string permissions = 5;
   MembershipStatus membership_status = 6;
+  string token_id = 7;     // for the AI-app connection record (app id "pat:<token_id>")
+  string token_name = 8;
+  // scopes (field 4) are already capped by the owner's CURRENT role (claude/mcp-design.md §16).
 }
 
 message RegisterDeviceRequest {
@@ -1472,6 +1480,17 @@ message CheckAgentUseRequest {
 
 message CheckAgentUseResponse {
   bool allowed = 1;       // false: an org admin blocked this app for the caller in this org
+  // The MCP scopes the caller's role in this org allows (claude/mcp-design.md §16); the gateway grants an agent
+  // only token scopes ∩ these. Write scopes are absent while the org is archived or the account restricted.
+  repeated string role_scopes = 2;
+}
+
+message GetMyAgentScopesRequest {
+  string org_id = 1;
+}
+
+message GetMyAgentScopesResponse {
+  repeated string scopes = 1;  // tasks:read, tasks:write, docs:read, docs:write, projects:admin — the allowed subset
 }
 
 message OrgAgentConnection {
