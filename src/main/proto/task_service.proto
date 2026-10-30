@@ -558,6 +558,10 @@ message DeleteTaskTypeRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string task_type_id = 2;
+  // Where the type's tasks go first (every project of the org, binned ones too). Empty: refused while any task
+  // still has the type. Must be another type of the org (or a system one) of the same kind — plain, epic-like or
+  // initiative — so no epic link or sub-task rule breaks on the way.
+  string move_to_task_type_id = 3;
 }
 
 // An uploaded mark, from a file already uploaded through the normal file endpoint. The bytes are
@@ -612,6 +616,9 @@ message DeleteWorkflowStatusRequest {
   reserved 1; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
   string status_id = 2;
+  // Where the status's tasks go first (archived and binned ones too). Empty: refused while any task is in it.
+  // Must be another status of the same project; the move skips transition rules, like an admin regroup.
+  string move_to_status_id = 3;
 }
 
 message ReorderWorkflowStatusesRequest {
