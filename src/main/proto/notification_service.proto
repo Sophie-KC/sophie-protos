@@ -33,6 +33,11 @@ service NotificationService {
   rpc MarkNotificationRead(MarkNotificationReadRequest) returns (google.protobuf.Empty);
   // Marks every unread notification the caller owns in org_id as read.
   rpc MarkAllRead(MarkAllReadRequest) returns (google.protobuf.Empty);
+  // Caller-scoped: marks read every unread notification the caller owns in org_id whose source_reference
+  // JSON has `key` == `value` (e.g. conversationId=<id> when a chat is opened, taskId=<id> when a task is
+  // opened). Idempotent. Like MarkNotificationRead/MarkAllRead, publishes notification.read to the caller's
+  // other sessions and dismisses the matching push on their devices.
+  rpc MarkReadBySource(MarkReadBySourceRequest) returns (MarkReadBySourceResponse);
   // Fast unread count for a badge, scoped to the caller + org_id.
   rpc GetUnreadCount(GetUnreadCountRequest) returns (GetUnreadCountResponse);
 
@@ -112,6 +117,16 @@ message MarkAllReadRequest {
   string org_id = 1;
 }
 
+message MarkReadBySourceRequest {
+  string org_id = 1;
+  string key = 2;    // source_reference field, e.g. "conversationId", "taskId", "eventId" (letters only)
+  string value = 3;  // e.g. the conversation/task id
+}
+
+message MarkReadBySourceResponse {
+  int32 marked = 1; // how many were unread and are now read
+}
+
 message GetUnreadCountRequest {
   string org_id = 1;
 }
@@ -183,6 +198,12 @@ message UnregisterPushTokenRequest {
 // (already a dumb relay) needs no changes to carry this as its second real producer.
 
 message NotificationEvent {
-  string type = 1; // notification.created
+  // notification.created: `notification` is set.
+  // notification.read: `notification_ids` lists what was just marked read (MarkNotificationRead,
+  //   MarkReadBySource); `org_id` is set. Other sessions drop them from the bell and refresh the badge.
+  // notification.read_all: MarkAllRead in `org_id`.
+  string type = 1;
   Notification notification = 2;
+  repeated string notification_ids = 3;
+  string org_id = 4;
 }
