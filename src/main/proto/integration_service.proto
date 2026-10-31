@@ -116,6 +116,9 @@ message Connection {
   // when it has never been polled (a DIRECT-webhook connection is only polled by the safety net).
   google.protobuf.Timestamp last_synced_at = 9;
   string last_sync_error = 10;
+  // OAuth scopes the provider actually granted (GOOGLE; empty for others). Lets clients tell whether
+  // Google Meet modes are already authorized before asking for more.
+  repeated string granted_scopes = 11;
 }
 
 message ListConnectionsRequest {
@@ -154,6 +157,12 @@ message ConfirmGitLabGroupSelectionRequest {
 
 message InitiateGoogleOAuthRequest {
   string org_id = 1;
+  // Extra capabilities to ask for incrementally (include_granted_scopes=true), on top of the base
+  // calendar.readonly + email: MEET_CALENDAR (calendar.events) | MEET_SPACE (meetings.space.created).
+  repeated string features = 2;
+  // Same-origin path to return to after the callback (e.g. "/calendar?meetConnected=1"). Empty = the
+  // Connected calendars settings page.
+  string return_path = 3;
 }
 
 message InitiateGoogleOAuthResponse {
@@ -172,6 +181,7 @@ message GetAccessTokenResponse {
   // on every call, rather than trusting a check done once at connect time — see
   // GoogleCalendarSyncService.pollConnection in calendar-service for why that trust was misplaced.
   string connected_by = 3;
+  repeated string granted_scopes = 4; // see Connection.granted_scopes
 }
 
 // ── Provider profiles ────────────────────────────────────────────────────────────────────────────

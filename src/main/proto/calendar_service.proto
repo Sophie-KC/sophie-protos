@@ -82,6 +82,13 @@ message UpdateUserSettingsRequest {
   string          default_event_color      = 4; // '#RRGGBB'
   string          default_view             = 5; // WEEK | DAY | MONTH | AGENDA
   optional int32  week_start_day           = 6; // 1-7, ISO-8601 Monday=1; absent = inherit org
+  // Google Meet (all absent = unchanged). meet_mode: ASK | CALENDAR | SPACE | OFF —
+  //   CALENDAR = mirror the event into my Google Calendar with a Meet (calendar.events scope),
+  //   SPACE    = a bare Meet link from the Meet REST API (meetings.space.created scope),
+  //   OFF      = never add Meet by default, ASK = choose on the form every time.
+  optional string meet_mode                     = 7;
+  // "Don't ask again" on the form's "Connect Google to add Meet" offer.
+  optional bool   meet_connect_prompt_dismissed = 8;
 }
 
 message UpdateOrgSettingsRequest {
@@ -101,6 +108,8 @@ message SettingsView {
   optional int32  org_default_reminder_minutes = 6;
   optional string org_default_timezone         = 7;
   optional int32  org_week_start_day            = 8;
+  string meet_mode                     = 9;  // ASK (default) | CALENDAR | SPACE | OFF
+  bool   meet_connect_prompt_dismissed = 10;
 }
 
 // ===================== Read paths =====================
@@ -144,6 +153,9 @@ message EventView {
   string source = 22;
   // Navigation v2's "Join": the event's video-call link, pasted by the organizer (any https URL). Empty = none.
   string conference_url = 23;
+  // How conference_url came to be: "" (pasted / none) | GOOGLE_MEET_CALENDAR | GOOGLE_MEET_SPACE |
+  // GOOGLE_MEET_EXTERNAL (read from a synced Google event's hangoutLink).
+  string conference_provider = 24;
 }
 
 message GetExternalEventDetailRequest {
@@ -167,6 +179,7 @@ message ExternalEventDetailView {
   string end_at      = 7;
   bool   is_all_day  = 8;
   string timezone    = 9;
+  string conference_url = 10; // the Google event's Meet link (hangoutLink / conferenceData video entry point)
 }
 
 message GetEventDetailRequest {
@@ -198,6 +211,11 @@ message EventDetailView {
   bool   is_cancelled_occurrence = 21;
   bool   is_override_occurrence  = 22;
   string conference_url          = 23; // see EventView.conference_url
+  string conference_provider     = 24; // see EventView.conference_provider
+  // Set on a Create/Update response when a requested Google Meet could not be made; the event itself
+  // was saved without one. MEET_NOT_CONNECTED | MEET_REAUTH_REQUIRED (scope missing / token revoked) |
+  // MEET_FAILED (Google error). Empty = no problem.
+  string meet_warning            = 25;
 }
 
 message AttendeeView {
@@ -317,6 +335,10 @@ message CreateEventRequest {
   repeated AttendeeInput attendees = 14;
   repeated ReminderInput reminders = 15; // empty = resolve default (org -> user -> 10)
   string conference_url = 16;            // https only; empty = none
+  // Ask for a Google Meet link on the organizer's connected Google account. Ignored when conference_url
+  // is set. meet_mode: CALENDAR | SPACE; empty = the user's saved meet_mode (ASK/OFF fall back to SPACE).
+  bool   add_google_meet = 17;
+  string meet_mode       = 18;
 }
 
 message AttendeeInput {
@@ -360,6 +382,10 @@ message UpdateEventRequest {
   repeated AttendeeInput attendees          = 16;
   repeated ReminderInput reminders          = 17;
   optional string conference_url            = 18; // absent = unchanged; empty clears; https only
+  // absent = unchanged; true = add a Meet if the event has none; false = remove a Meet we generated
+  // (deletes the Google mirror). Series-level only (ALL_EVENTS or a non-recurring event).
+  optional bool   add_google_meet           = 19;
+  string          meet_mode                 = 20; // as CreateEventRequest.meet_mode
 }
 
 message DeleteEventRequest {
@@ -452,6 +478,7 @@ message ReminderNotificationPayload {
                               // decode both fields to get everything it needs
   string occurrence_id = 6;
   string idempotency_key = 7;
+  string conference_url = 8; // "" when the event has no call link — the reminder's "Join" button
 }
 
 message SeriesEndingNotificationPayload {
