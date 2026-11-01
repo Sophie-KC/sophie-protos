@@ -456,6 +456,9 @@ message EventSourceReference {
 // invite / updated / cancelled carry nothing beyond the event's current title.
 message EventNotificationPayload {
   string title = 1;
+  // The event's video-call link (Google Meet or a pasted https URL), "" when none. Set on invite/update so
+  // Telegram can show "Join video call" (0.123.0).
+  string conference_url = 2;
 }
 
 message RsvpNotificationPayload {
