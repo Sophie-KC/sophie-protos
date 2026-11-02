@@ -2445,6 +2445,21 @@ message TeamBoard {
   // Navigation v2 (g-board-settings › General): OWN (default, "" reads as OWN) = the board plans and runs its own
   // sprints; NONE = a continuous board with no sprint UI (sprint actions refused with FAILED_PRECONDITION).
   string sprint_source = 15;
+  // Team visibility: a board with at least one viewer is LIMITED — only its admins, its listed people and teams (and its
+  // owner team) can open it, on top of reaching one of its projects. No viewers = anyone who reaches a project.
+  bool restricted = 16;
+  repeated TeamBoardViewer viewers = 17;         // filled for board admins only; others just see `restricted`
+  optional string owner_team_id = 18;            // the team the board belongs to; its members always pass a limited board
+}
+
+// One entry of a board's visibility list.
+message TeamBoardViewer {
+  string subject_type = 1;          // USER | TEAM
+  string subject_id = 2;
+}
+
+message TeamBoardViewers {
+  repeated TeamBoardViewer viewers = 1;
 }
 
 message TeamBoardSprintInfo {
@@ -2461,10 +2476,13 @@ message CreateTeamBoardRequest {
   string name = 2;
   string scope = 3;                  // optional JSON; defaults to "{}"
   repeated string project_ids = 4;   // at least one
+  optional string owner_team_id = 5;                 // an active team of the org; scope.teamIds defaults to it when empty
+  optional TeamBoardViewers viewers = 6;             // omit/empty = not limited
 }
 
 message ListTeamBoardsRequest {
   string org_id = 1;
+  optional string owner_team_id = 2;                 // only the boards owned by this team
 }
 
 message ListTeamBoardsResponse {
@@ -2485,6 +2503,8 @@ message UpdateTeamBoardRequest {
   optional int32 sprint_length_days = 7;   // 1-90; 0 = the default (14)
   optional StringList kept_off_status_ids = 8;   // replaces the set; each must be a status of the board's projects in no column
   optional string sprint_source = 9;       // OWN | NONE; NONE refused while a sprint is running
+  optional TeamBoardViewers viewers = 10;  // replaces the visibility list; empty = not limited
+  optional string owner_team_id = 11;      // "" clears
 }
 
 message DeleteTeamBoardRequest {
