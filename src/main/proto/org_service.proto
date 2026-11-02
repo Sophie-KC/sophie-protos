@@ -238,6 +238,12 @@ service OrgService {
   // (BatchGetUsers, SearchOrgMembers) needs an id or an org already in hand. Throws NOT_FOUND for no
   // match, same convention as GetOrganizationForStaff.
   rpc LookupUserByEmailForStaff(LookupUserByEmailRequest) returns (UserProfile);
+  // Staff-tier (any active staff role). Every registered user account on the platform, newest first, for
+  // the admin panel's Users directory. Keyset-paged like ListOrganizations; `query` narrows it to a
+  // case-insensitive substring of the email, first name, last name or "first last". The response carries
+  // the total for that filter so the screen can say "N users". Read-only — acting on a user still goes
+  // through the by-email lookup and its staff actions.
+  rpc ListUsersForStaff(ListUsersForStaffRequest) returns (ListUsersForStaffResponse);
   // Staff-tier (PLATFORM_ADMIN or SUPPORT). Restricts or un-restricts a user account: a restricted account
   // is read-only everywhere (its personal API tokens lose their write scopes too). Idempotent; returns the
   // updated profile. NOT_FOUND for an unknown user, INVALID_ARGUMENT for a missing reason when restricting.
@@ -764,6 +770,21 @@ message GetOrganizationForStaffRequest {
 
 message LookupUserByEmailRequest {
   string email = 1;
+}
+
+message ListUsersForStaffRequest {
+  // Keyset on created_at DESC then id DESC (newest first), so users registering while a staff member
+  // pages never cause a skipped or repeated row. Default direction FORWARD.
+  .org.sophie.common.PageRequest page = 1;
+  // Case-insensitive substring over email, first name, last name and "first last". Empty = everyone.
+  string query = 2;
+}
+
+message ListUsersForStaffResponse {
+  repeated UserProfile users = 1;
+  .org.sophie.common.PageResponse page = 2;
+  // Count of all users matching `query` (not just this page).
+  int64 total = 3;
 }
 
 message UserProfile {
