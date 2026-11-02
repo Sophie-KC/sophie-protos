@@ -328,6 +328,9 @@ service OrgService {
   rpc ListOrgAgentConnections(ListOrgAgentConnectionsRequest) returns (ListOrgAgentConnectionsResponse);
   // Org Admin only: block (or allow again) one member's use of one AI app in this org. NOT_FOUND if never used here.
   rpc SetOrgAgentConnectionBlocked(SetOrgAgentConnectionBlockedRequest) returns (OrgAgentConnection);
+  // Org Admin only: which kinds of AI app may connect here at all (claude/mcp-design.md §20). Off = any app.
+  rpc GetOrgAgentAppPolicy(GetOrgAgentAppPolicyRequest) returns (OrgAgentAppPolicy);
+  rpc SetOrgAgentAppPolicy(SetOrgAgentAppPolicyRequest) returns (OrgAgentAppPolicy);
 
   // ── Preferences (claude/preferences-design.md §10–11) ────────────────────────────────────────────
   // A preference key (registry in org-service; e.g. appearance.theme, locale.language) resolves through
@@ -1479,10 +1482,13 @@ message CheckAgentUseRequest {
 }
 
 message CheckAgentUseResponse {
-  bool allowed = 1;       // false: an org admin blocked this app for the caller in this org
+  bool allowed = 1;       // false: refused here, see refusal
   // The MCP scopes the caller's role in this org allows (claude/mcp-design.md §16); the gateway grants an agent
   // only token scopes ∩ these. Write scopes are absent while the org is archived or the account restricted.
   repeated string role_scopes = 2;
+  // Why allowed is false: "blocked" (an org admin blocked this app for the caller) or "not_approved" (the org lets
+  // only approved kinds of AI app connect, and this one's kind isn't approved). Empty when allowed.
+  string refusal = 3;
 }
 
 message GetMyAgentScopesRequest {
@@ -1518,6 +1524,26 @@ message SetOrgAgentConnectionBlockedRequest {
   string user_id = 2;
   string client_id = 3;
   bool blocked = 4;
+}
+
+// Which kinds of AI app may act in an org (claude/mcp-design.md §20). Kinds are those DescribeAgentApp answers
+// (claude | chatgpt | vscode | local | other) plus "pat" for personal API tokens used by AI apps.
+message OrgAgentAppPolicy {
+  string org_id = 1;
+  bool only_approved = 2;               // false: any app may connect (the default)
+  repeated string approved_kinds = 3;   // what may connect while only_approved is on
+  optional google.protobuf.Timestamp updated_at = 4;
+  optional string updated_by = 5;
+}
+
+message GetOrgAgentAppPolicyRequest {
+  string org_id = 1;
+}
+
+message SetOrgAgentAppPolicyRequest {
+  string org_id = 1;
+  bool only_approved = 2;
+  repeated string approved_kinds = 3;
 }
 
 // ===================== Preferences =====================
