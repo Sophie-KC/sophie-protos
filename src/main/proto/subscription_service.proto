@@ -382,6 +382,19 @@ service SubscriptionAdminService {
   // or an already-expired expires_at should be visible immediately, not just trusted blind).
   rpc SetEntitlementOverride (SetEntitlementOverrideRequest) returns (EntitlementMap);
   rpc RemoveEntitlementOverride (RemoveEntitlementOverrideRequest) returns (EntitlementMap);
+
+  // Admin-granted plan: puts an org on `plan_code` immediately, with NO invoice and NO price row (a
+  // comped/granted plan, e.g. a new org put on Business before payments are live). PLATFORM_ADMIN only,
+  // live-re-verified like the other writes. Never requests an invoice — PeriodCloseJob already rolls a
+  // paid plan with no plan_price_id without billing it. Returns the updated Subscription.
+  rpc AssignPlanForStaff (AssignPlanForStaffRequest) returns (Subscription);
+}
+
+message AssignPlanForStaffRequest {
+  string org_id = 1;
+  string plan_code = 2;       // FREE | PRO | BUSINESS (any plan.code)
+  string billing_period = 3;  // MONTHLY | ANNUAL; ignored (stored as MONTHLY) for the free plan
+  string reason = 4;
 }
 
 message GetEntitlementsForStaffRequest {
