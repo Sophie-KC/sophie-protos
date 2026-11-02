@@ -244,6 +244,11 @@ service OrgService {
   // the total for that filter so the screen can say "N users". Read-only — acting on a user still goes
   // through the by-email lookup and its staff actions.
   rpc ListUsersForStaff(ListUsersForStaffRequest) returns (ListUsersForStaffResponse);
+  // Staff-tier (any active staff role). org-service's own admin_audit_log, newest first, optionally one org's rows:
+  // ORG_DELETION_REQUESTED / ORG_RESTORED (an org's deletion and its undo), ACCOUNT_DELETION_REQUESTED /
+  // ACCOUNT_RESTORED (a user's own account deletion and its undo) — who did it (a customer user or a staff member)
+  // and when. Written in the same transaction as the change itself.
+  rpc ListAdminAuditLogForStaff(ListAdminAuditLogRequest) returns (ListAdminAuditLogResponse);
   // Staff-tier (PLATFORM_ADMIN or SUPPORT). Restricts or un-restricts a user account: a restricted account
   // is read-only everywhere (its personal API tokens lose their write scopes too). Idempotent; returns the
   // updated profile. NOT_FOUND for an unknown user, INVALID_ARGUMENT for a missing reason when restricting.
@@ -778,6 +783,30 @@ message ListUsersForStaffRequest {
   .org.sophie.common.PageRequest page = 1;
   // Case-insensitive substring over email, first name, last name and "first last". Empty = everyone.
   string query = 2;
+}
+
+message ListAdminAuditLogRequest {
+  .org.sophie.common.PageRequest page = 1;
+  optional string org_id = 2;
+}
+
+message ListAdminAuditLogResponse {
+  repeated AdminAuditLogEntry entries = 1;
+  .org.sophie.common.PageResponse page = 2;
+}
+
+message AdminAuditLogEntry {
+  string id = 1;
+  string actor_user_id = 2;           // the customer user or the platform_staff member who did it
+  string actor_email = 3;
+  string action = 4;
+  string target_type = 5;             // ORGANIZATION | USER
+  optional string target_id = 6;
+  optional string org_id = 7;
+  optional string before_state = 8;   // raw JSON text
+  optional string after_state = 9;
+  optional string reason = 10;
+  google.protobuf.Timestamp created_at = 11;
 }
 
 message ListUsersForStaffResponse {
