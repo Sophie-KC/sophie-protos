@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package com.platform.support.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.supportservice.grpc";
+
+import "google/protobuf/timestamp.proto";
+
+// Support Service (claude/support-requests-design.md): requests a customer admin sends to Sofia Space
+// staff about something that went wrong (first use: a failed import), and the staff tools to work them.
+//
+// Two audiences. The gateway calls the member-facing RPCs on behalf of a signed-in Org Admin, AFTER it
+// has checked the caller is an admin of org_id and has built the snapshot from the owning service, so
+// this service trusts org_id/snapshot_json from the gateway and never lets a client write them. The
+// *ForStaff RPCs are PrincipalTier.STAFF: the platform-staff realm only.
+service SupportService {
+  // One OPEN/IN_PROGRESS request per (org, ref_type, ref_id): a second call returns the existing one with
+  // created=false. RESOURCE_EXHAUSTED past 10 new requests per org per 24 h. INVALID_ARGUMENT for an
+  // unknown ref_type or a message over 2000 characters.
+  rpc CreateSupportRequest(CreateSupportRequestRequest) returns (CreateSupportRequestResponse);
+  // The caller's org's requests about one reference (ref_type + ref_id both set), newest first. No notes.
+  rpc ListOrgSupportRequests(ListOrgSupportRequestsRequest) returns (ListSupportRequestsResponse);
+
+  // Staff tier.
+  rpc ListSupportRequestsForStaff(ListSupportRequestsForStaffRequest) returns (ListSupportRequestsResponse);
+  rpc GetSupportRequestForStaff(GetSupportRequestForStaffRequest) returns (SupportRequestDetail);
+  // OPEN -> IN_PROGRESS (also sets the assignee to staff_id) -> RESOLVED, and back (reopen) from RESOLVED.
+  rpc UpdateSupportRequestStatusForStaff(UpdateSupportRequestStatusForStaffRequest) returns (SupportRequestDetail);
+  rpc AddSupportNoteForStaff(AddSupportNoteForStaffRequest) returns (SupportRequestDetail);
+}
+
+message SupportRequest {
+  string id = 1;
+  string org_id = 2;
+  string created_by = 3;            // internal users.id of the admin who reported it
+  string ref_type = 4;              // IMPORT_JOB
+  string ref_id = 5;                // e.g. the import job id
+  string message = 6;               // the customer's words, plain text, <= 2000 chars
+  string status = 7;                // OPEN | IN_PROGRESS | RESOLVED
+  string snapshot_json = 8;         // facts captured at report time; never secrets
+  string assigned_to = 9;           // staff id, empty when nobody took it
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  google.protobuf.Timestamp resolved_at = 12;  // unset until RESOLVED
+}
+
+message SupportNote {
+  string id = 1;
+  string author_staff_id = 2;
+  string body = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+// Staff view: the request plus its internal notes (oldest first).
+message SupportRequestDetail {
+  SupportRequest request = 1;
+  repeated SupportNote notes = 2;
+}
+
+message CreateSupportRequestRequest {
+  string org_id = 1;
+  string created_by = 2;
+  string ref_type = 3;
+  string ref_id = 4;
+  string message = 5;
+  string snapshot_json = 6;         // built by the gateway from the owning service
+}
+
+message CreateSupportRequestResponse {
+  SupportRequest request = 1;
+  bool created = 2;                 // false = an open request for this reference already existed
+}
+
+message ListOrgSupportRequestsRequest {
+  string org_id = 1;
+  string ref_type = 2;
+  string ref_id = 3;
+}
+
+message ListSupportRequestsForStaffRequest {
+  string status = 1;                // empty = any
+  string query = 2;                 // matches ref_id, org_id or message; empty = all
+  int32 page = 3;                   // 0-based
+  int32 page_size = 4;              // default 25, max 100
+}
+
+message ListSupportRequestsResponse {
+  repeated SupportRequest requests = 1;
+  int64 total = 2;
+}
+
+message GetSupportRequestForStaffRequest {
+  string id = 1;
+}
+
+message UpdateSupportRequestStatusForStaffRequest {
+  string id = 1;
+  string status = 2;                // IN_PROGRESS | RESOLVED | OPEN
+  string staff_id = 3;
+}
+
+message AddSupportNoteForStaffRequest {
+  string id = 1;
+  string staff_id = 2;
+  string body = 3;                  // <= 4000 chars
+}

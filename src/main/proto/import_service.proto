@@ -31,6 +31,14 @@ service ImportService {
   rpc CancelImportJob(ImportJobActionRequest) returns (ImportJob);  // what was written stays
   // What was not imported, and why — the report screen and its CSV.
   rpc ListImportReportItems(ListImportReportItemsRequest) returns (ListImportReportItemsResponse);
+  // What staff need to look at a failed or paused import (support request snapshot): status, phase, pause
+  // reason, counters, site, and the technical failure detail the customer-facing last_error hides. Org
+  // Admin only, like the rest; never contains the credential. NOT_FOUND when the job is not in org_id.
+  rpc GetImportJobSupportSnapshot(GetImportJobRequest) returns (ImportJobSupportSnapshot);
+}
+
+message ImportJobSupportSnapshot {
+  string snapshot_json = 1;
 }
 
 message CreateImportJobRequest {
