@@ -261,6 +261,12 @@ service OrgService {
   // enforcement is a real security boundary for its actual (non-staff) callers.
   rpc ListOrgMembershipsForStaff(ListMyOrganizationsRequest) returns (ListMyOrganizationsResponse);
 
+  // Staff-tier, any active staff role: every member of one org with their ORG-scope role(s) and activation
+  // status, for the admin panel's organization page. The reverse of ListOrgMembershipsForStaff above (user ->
+  // orgs). Same rows and shape as ListOrgMembers, minus that RPC's Org Admin gate, which a staff caller can
+  // never satisfy. Unpaged, like ListOrgMembers; org_id is the org looked at, never the caller's.
+  rpc ListOrgMembersForStaff(ListOrgMembersRequest) returns (ListOrgMembersResponse);
+
   // ── Platform staff management (admin-panel-design-prompt.md's Staff screen) ─────────────────
   // Staff-tier, PLATFORM_ADMIN only (org-service enforces the role itself — never trust a
   // caller-supplied role). The caller's own identity comes from the gRPC principal
