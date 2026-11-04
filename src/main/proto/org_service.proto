@@ -274,6 +274,14 @@ service OrgService {
   // platform with zero admins can never re-admin itself.
   rpc DeactivateStaff(DeactivateStaffRequest) returns (PlatformStaffMember);
 
+  // The caller's OWN sign-in security (never someone else's: the identity comes from the gRPC
+  // principal, there is no staff-id field). PLATFORM_ADMIN only. Reads / sets whether the caller's
+  // staff account is asked for a one-time code at sign-in. Backed by the `skip-2fa` realm role in the
+  // staff realm; the staff browser flow skips the OTP step only for holders of that role, so a missing
+  // role (or a failed write) leaves the code required. Takes effect at the caller's next sign-in.
+  rpc GetMyStaffSecurity(google.protobuf.Empty) returns (StaffSecurity);
+  rpc SetMyTwoFactorSkipped(SetTwoFactorSkippedRequest) returns (StaffSecurity);
+
   // Trusted-internal, no identity field — same tier as IsOrgMember. Added for subscription-service's
   // ChangePlan (subscriptions Phase 2b §2): seats requested on a plan change must never be set below
   // the org's actual current member count, or the invoice bills for fewer seats than are in use.
@@ -849,6 +857,14 @@ message PlatformStaffMember {
   string status = 7;        // ACTIVE | DEACTIVATED
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp deactivated_at = 9; // unset while ACTIVE
+}
+
+message StaffSecurity {
+  bool two_factor_skipped = 1;  // true: this account signs in without a one-time code
+}
+
+message SetTwoFactorSkippedRequest {
+  bool skipped = 1;
 }
 
 message ListStaffResponse {
