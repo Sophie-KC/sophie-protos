@@ -103,6 +103,19 @@ service OrgService {
   // is this request for" from the Host header, BEFORE knowing anything about the caller. Trusted-internal.
   rpc GetOrgIdBySubdomain(GetOrgIdBySubdomainRequest) returns (GetOrgIdBySubdomainResponse);
 
+  // ===== Demo sandboxes ("Try the demo", claude/demo-sandbox-design.md). All SERVICE tier, called by the Gateway. =====
+  // Creates a guest user + an empty demo org in PROVISIONING and returns session tokens for the guest and the
+  // template personas so the Gateway can seed the org through its own public API. RESOURCE_EXHAUSTED when the
+  // global cap of live sandboxes is reached; FAILED_PRECONDITION while the feature is switched off.
+  rpc StartDemoSandbox(StartDemoSandboxRequest) returns (StartDemoSandboxResponse);
+  rpc GetDemoSandbox(GetDemoSandboxRequest) returns (DemoSandbox);
+  // PROVISIONING -> READY (seeding finished) or -> FAILED (seeding failed; the sandbox is torn down).
+  rpc FinishDemoSandbox(FinishDemoSandboxRequest) returns (DemoSandbox);
+  // Bumps the inactivity clock of the sandbox that owns this org. A no-op for any other org.
+  rpc TouchDemoSandbox(TouchDemoSandboxRequest) returns (google.protobuf.Empty);
+  // Runs the 24h-inactivity cleanup now (it also runs on a schedule). dry_run only reports.
+  rpc CleanupDemoSandboxes(CleanupDemoSandboxesRequest) returns (CleanupDemoSandboxesResponse);
+
   // Role management — all mutating RPCs require requested_by_user_id to be the target org's Org Admin.
   rpc CreateRole(CreateRoleRequest) returns (Role);
   rpc UpdateRole(UpdateRoleRequest) returns (Role);
@@ -946,6 +959,66 @@ message GetOrgIdBySubdomainResponse {
   // found = false.
   string status = 3;
   google.protobuf.Timestamp purge_after = 4;           // set while DELETION_PENDING
+  // True for a throwaway "Try the demo" workspace (claude/demo-sandbox-design.md). The Gateway uses it to
+  // enforce the demo restrictions at the edge and to keep the sandbox's last-activity clock moving.
+  bool is_demo = 5;
+}
+
+// ===================== Demo sandboxes =====================
+
+message DemoSandbox {
+  string sandbox_id = 1;
+  string status = 2;                       // PROVISIONING | READY | FAILED | EXPIRED
+  string org_id = 3;
+  string subdomain = 4;
+  string user_id = 5;                      // the guest's internal user id
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_activity_at = 7;
+  google.protobuf.Timestamp expires_at = 8;   // last_activity_at + the inactivity window
+}
+
+message StartDemoSandboxRequest {
+  string client_ip_hash = 1;               // hashed by the Gateway; only ever compared, for the per-IP live cap
+  string locale = 2;                       // en | ru | uz; names the guest and the org
+}
+
+message DemoPersonaSession {
+  string key = 1;                          // template persona key, e.g. "timur"
+  string user_id = 2;
+  string access_token = 3;
+}
+
+message StartDemoSandboxResponse {
+  DemoSandbox sandbox = 1;
+  string access_token = 2;                 // the guest (the org's only Org Admin)
+  string refresh_token = 3;
+  int64 expires_in = 4;
+  repeated DemoPersonaSession personas = 5;   // members of the org the template content is written as
+}
+
+message GetDemoSandboxRequest {
+  string sandbox_id = 1;
+}
+
+message FinishDemoSandboxRequest {
+  string sandbox_id = 1;
+  bool success = 2;
+  string failure_reason = 3;               // logged and kept for diagnosis; never shown to the visitor
+}
+
+message TouchDemoSandboxRequest {
+  string org_id = 1;
+}
+
+message CleanupDemoSandboxesRequest {
+  bool dry_run = 1;
+}
+
+message CleanupDemoSandboxesResponse {
+  int32 expired = 1;                       // idle sandboxes torn down (or that would be, in a dry run)
+  int32 stuck = 2;                         // sandboxes that never left PROVISIONING
+  int32 failed = 3;                        // teardowns that threw and will be retried
+  bool dry_run = 4;
 }
 
 // ===================== Roles =====================
