@@ -493,6 +493,17 @@ service OrgService {
   // Org Admin only. Applies only the keys present in `changes`. INVALID_ARGUMENT for an unknown key,
   // or when the result would leave none of chat / tasks / docs on (MODULES_EMPTY in the description).
   rpc UpdateOrgModules(UpdateOrgModulesRequest) returns (OrgModules);
+
+  // ── Chat status (design_handoff_chat_discord §2) ──
+  // A person's chosen presence mode + custom status + time zone, per org. Live connection state
+  // (online/idle/offline, last seen) is websocket-service's; the gateway merges the two.
+  // Any org member, about themselves (verified principal).
+  rpc GetMyChatStatus(GetMyChatStatusRequest) returns (ChatStatus);
+  rpc SetMyChatStatus(SetMyChatStatusRequest) returns (ChatStatus);
+  // Any org member of org_id may read any other member's (it is shown to the whole workspace); SERVICE
+  // principals too (notification-service's DND check). Unknown/foreign ids are omitted. Expired custom
+  // statuses (clear_at passed) come back cleared.
+  rpc GetChatStatuses(GetChatStatusesRequest) returns (GetChatStatusesResponse);
 }
 
 message ValidateSessionRequest {
@@ -2063,4 +2074,37 @@ message PreviewAppLinkRequest {
 message AppLinkPreview {
   string title = 1;
   string favicon_url = 2;
+}
+
+// ===================== Chat status =====================
+
+message ChatStatus {
+  string user_id = 1;
+  string mode = 2;                            // ONLINE (auto: idle after 10 min) | IDLE | DND
+  string custom_emoji = 3;                    // empty = none
+  string custom_text = 4;                     // empty = none; ≤ 100 chars
+  optional google.protobuf.Timestamp clear_at = 5;   // absent = don't clear
+  string time_zone = 6;                       // IANA id, e.g. Asia/Tashkent; empty = unknown
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message GetMyChatStatusRequest { string org_id = 1; }
+
+message SetMyChatStatusRequest {
+  string org_id = 1;
+  optional string mode = 2;                   // absent = keep
+  bool set_custom_status = 3;                 // true = custom_emoji/custom_text/clear_at below replace it (blank = clear)
+  string custom_emoji = 4;
+  string custom_text = 5;
+  optional google.protobuf.Timestamp clear_at = 6;
+  optional string time_zone = 7;              // absent = keep; must be a valid IANA id
+}
+
+message GetChatStatusesRequest {
+  string org_id = 1;
+  repeated string user_ids = 2;               // ≤ 500
+}
+
+message GetChatStatusesResponse {
+  repeated ChatStatus statuses = 1;           // only users with a stored row
 }

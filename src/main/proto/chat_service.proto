@@ -195,6 +195,43 @@ service ChatService {
   // Thread-root flags, last message / activity, every member's read state at the newest message, one
   // live "added" event per member. Safe to call more than once.
   rpc FinishConversationImport(FinishConversationImportRequest) returns (Conversation);
+
+  // ── Channel categories (design_handoff_chat_discord §1) ──
+  // Categories group CHANNELS in the sidebar; the layout is the same for everyone. Only org admins
+  // create, rename, reorder or delete them, or move channels between them. A private category is
+  // listed only to org admins and to people holding one of allowed_role_ids; for anyone else its
+  // channels fall under "No category" (a category never grants or removes channel access).
+  rpc ListChannelCategories(ListChannelCategoriesRequest) returns (ListChannelCategoriesResponse); // any org member
+  rpc CreateChannelCategory(CreateChannelCategoryRequest) returns (ChannelCategory);              // org admin
+  rpc UpdateChannelCategory(UpdateChannelCategoryRequest) returns (ChannelCategory);              // org admin
+  // Its channels move to No category (appended in their current order); no channel is deleted.
+  rpc DeleteChannelCategory(DeleteChannelCategoryRequest) returns (google.protobuf.Empty);        // org admin
+  // category_ids must be exactly the org's categories, in the new order.
+  rpc ReorderChannelCategories(ReorderChannelCategoriesRequest) returns (google.protobuf.Empty);  // org admin
+  // CHANNEL only. Empty category_id = No category. position = 0-based index inside the target; the
+  // other channels there shift. Out-of-range positions clamp to the end.
+  rpc MoveChannelToCategory(MoveChannelToCategoryRequest) returns (Conversation);                 // org admin
+
+  // ── Forward (design_handoff_chat_discord §3) ──
+  // Caller must be a member of the source conversation and of every target (1–5 distinct targets).
+  // Per target: the optional note is sent first as a normal message, then the forwarded copy (same
+  // content, attachments re-referenced to the new message, forwarded_from set). Polls cannot be
+  // forwarded (INVALID_ARGUMENT). Forwarding a forwarded message keeps pointing at the ORIGINAL.
+  rpc ForwardMessage(ForwardMessageRequest) returns (ForwardMessageResponse);
+
+  // ── Polls (design_handoff_chat_discord §4) ──
+  // A poll is a Message with kind = POLL. Per-option counts/voters are returned ONLY to a viewer who
+  // has voted or once the poll has ended (Message.poll.results_visible) — enforced here, never in the UI.
+  rpc CreatePoll(CreatePollRequest) returns (Message);
+  // Replaces the caller's vote with option_ids (1 option unless multi). Fails once ended.
+  rpc VotePoll(VotePollRequest) returns (Message);
+  rpc RemovePollVote(RemovePollVoteRequest) returns (Message);
+  // Only when allow_add_options; any member; max 10 options; fails once ended.
+  rpc AddPollOption(AddPollOptionRequest) returns (Message);
+  // The poll's creator, or an OWNER/ADMIN of the conversation, or an org admin.
+  rpc EndPoll(EndPollRequest) returns (Message);
+  // FAILED_PRECONDITION when anonymous; PERMISSION_DENIED (results hidden) until the caller voted or it ended.
+  rpc ListPollVoters(ListPollVotersRequest) returns (ListPollVotersResponse);
 }
 
 message UpdateChannelDescriptionRequest {
@@ -277,6 +314,10 @@ message Conversation {
   optional string last_read_cursor = 19;           // same opaque keyset codec as Message.cursor
   // The caller's notification level (SetConversationNotifyLevel): ALL | MENTIONS | NONE. Filled where 14-19 are.
   string notify_level = 20;
+  // Channel categories. Absent = No category, or a private category the CALLER may not see. Filled on
+  // every RPC that returns a CHANNEL Conversation; always absent for DIRECT.
+  optional string category_id = 21;
+  int32 position_in_category = 22;   // 0-based order inside its category (or inside No category)
 }
 
 // Deliberately not a full Message: no reactions, no attachments list, no seen-computation beyond the
@@ -297,6 +338,8 @@ message CreateGroupChannelRequest {
   string org_id = 1;
   string name = 2;
   repeated string initial_member_user_ids = 3;
+  // Optional; honoured only for an org admin (others get PERMISSION_DENIED when it is set). Appended last.
+  optional string category_id = 4;
 }
 
 message AddConversationMemberRequest {
@@ -388,6 +431,51 @@ message Message {
   // paths as `seen`; zero/empty elsewhere.
   int32 seen_by_count = 18;
   repeated string seen_by_user_ids = 19;
+  // design_handoff_chat_discord: "TEXT" (every message before this field) or "POLL".
+  string kind = 20;
+  optional ForwardedFrom forwarded_from = 21;   // set on a forwarded copy
+  optional Poll poll = 22;                       // kind = POLL only; results per the VIEWER (see CreatePoll)
+}
+
+// The ORIGINAL message a forwarded copy came from (a forward of a forward still points at the original).
+message ForwardedFrom {
+  string message_id = 1;
+  string conversation_id = 2;
+  string author_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+  optional string imported_author_name = 5;
+  // Per viewer: true when the viewer is a member of the source conversation (show "Jump to original"
+  // and #source). When false, conversation_id/message_id are still returned EMPTY — never leaked.
+  bool source_accessible = 6;
+  string source_conversation_name = 7;        // the channel name, only when source_accessible; empty for DMs
+  string source_message_cursor = 8;           // Message.cursor of the original, only when source_accessible
+}
+
+message Poll {
+  string question = 1;
+  repeated PollOption options = 2;            // by position
+  bool multiple_answers = 3;
+  bool anonymous = 4;
+  bool allow_add_options = 5;
+  google.protobuf.Timestamp ends_at = 6;
+  optional google.protobuf.Timestamp ended_at = 7; // set when ended early, or by the expiry sweep
+  bool ended = 8;                             // ended_at set OR now >= ends_at
+  // Always returned: how many distinct people voted (the "10 votes" footer), never per-option.
+  int32 voter_count = 9;
+  repeated string my_option_ids = 10;         // the viewer's current choice; empty = not voted
+  bool results_visible = 11;                  // viewer voted OR ended — gates every per-option count below
+  // Up to 5 most recent voters for the footer avatars; empty when anonymous OR !results_visible.
+  repeated string recent_voter_ids = 12;
+  string created_by = 13;
+  bool can_end = 14;                          // viewer may EndPoll (and it has not ended)
+}
+
+message PollOption {
+  string id = 1;
+  string text = 2;
+  int32 vote_count = 3;                       // 0 unless results_visible
+  bool winner = 4;                            // ended && vote_count == max > 0 (ties: every tied option)
+  string added_by = 5;                        // the creator for initial options
 }
 
 message MessageReaction {
@@ -625,6 +713,11 @@ message ChatEvent {
   // read_state.self_updated only. Published to the CALLER's own channel only, so their other devices
   // clear read badges without a refetch.
   optional ReadStateSelfEvent read_state_self = 8;
+  // categories.changed: org_id set, conversation_id empty, sent to every org member — refetch
+  // ListChannelCategories + ListMyConversations. poll.updated: conversation_id + poll_message_id,
+  // sent to every conversation member — results are per viewer, so refetch GetMessage.
+  optional string org_id = 9;
+  optional string poll_message_id = 10;
 }
 
 message TypingEvent {
@@ -837,4 +930,106 @@ message ConversationFile {
 message ListConversationFilesResponse {
   repeated ConversationFile files = 1;
   string next_cursor = 2;          // empty = no more
+}
+
+// ===================== Channel categories =====================
+
+message ChannelCategory {
+  string id = 1;
+  string org_id = 2;
+  string name = 3;                       // 1–64 chars, trimmed
+  int32 position = 4;                    // 0-based, org-wide order
+  bool private = 5;
+  repeated string allowed_role_ids = 6;  // org role ids; meaningful only when private
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message ListChannelCategoriesRequest { string org_id = 1; }
+message ListChannelCategoriesResponse {
+  repeated ChannelCategory categories = 1;   // visible to the caller, by position
+  bool can_manage = 2;                       // caller is an org admin
+}
+
+message CreateChannelCategoryRequest {
+  string org_id = 1;
+  string name = 2;
+  bool private = 3;
+  repeated string allowed_role_ids = 4;      // each must exist in the org (RoleExists)
+  repeated string move_channel_ids = 5;      // optional: channels moved in, in this order
+}
+
+message UpdateChannelCategoryRequest {
+  string category_id = 1;
+  optional string name = 2;
+  optional bool private = 3;
+  bool replace_allowed_role_ids = 4;         // true = allowed_role_ids below replaces the set
+  repeated string allowed_role_ids = 5;
+}
+
+message DeleteChannelCategoryRequest { string category_id = 1; }
+
+message ReorderChannelCategoriesRequest {
+  string org_id = 1;
+  repeated string category_ids = 2;
+}
+
+message MoveChannelToCategoryRequest {
+  string conversation_id = 1;
+  string category_id = 2;                    // empty = No category
+  int32 position = 3;
+}
+
+// ===================== Forward =====================
+
+message ForwardMessageRequest {
+  string message_id = 1;
+  repeated string target_conversation_ids = 2;   // 1–5, distinct
+  optional string note = 3;                      // TipTap JSON like SendMessage.content; blank = none
+  // Client-generated, one per target, same order (idempotency like SendMessage). Optional.
+  repeated string client_message_ids = 4;
+}
+
+message ForwardMessageResponse {
+  // Every created message in send order: [note?, forwarded copy] per target.
+  repeated Message messages = 1;
+}
+
+// ===================== Polls =====================
+
+message CreatePollRequest {
+  string conversation_id = 1;
+  optional string thread_root_message_id = 2;
+  string question = 3;                       // 1–300 chars
+  repeated string options = 4;               // 2–10, each 1–100 chars, distinct (case-insensitive)
+  bool multiple_answers = 5;
+  bool anonymous = 6;
+  bool allow_add_options = 7;
+  int64 duration_seconds = 8;                // one of 3600, 14400, 86400, 259200, 604800
+  optional string client_message_id = 9;
+}
+
+message VotePollRequest {
+  string message_id = 1;
+  repeated string option_ids = 2;            // non-empty; exactly 1 unless multiple_answers
+}
+
+message RemovePollVoteRequest { string message_id = 1; }
+
+message AddPollOptionRequest {
+  string message_id = 1;
+  string text = 2;
+}
+
+message EndPollRequest { string message_id = 1; }
+
+message ListPollVotersRequest { string message_id = 1; }
+
+message ListPollVotersResponse {
+  repeated PollOptionVoters options = 1;     // by position
+}
+
+message PollOptionVoters {
+  string option_id = 1;
+  string text = 2;
+  repeated string voter_user_ids = 3;        // earliest vote first
 }
