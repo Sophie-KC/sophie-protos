@@ -150,6 +150,10 @@ service TaskService {
   rpc RemoveTaskLabel(RemoveTaskLabelRequest) returns (google.protobuf.Empty);
   rpc BlockTask(BlockTaskRequest) returns (google.protobuf.Empty);
   rpc UnblockTask(UnblockTaskRequest) returns (google.protobuf.Empty);
+  // What holds an epic back from outside it: open tasks that are not the epic or under it, blocking the epic or one
+  // of its tasks (any project of the org). Caller = a member of the epic's project; blockers in projects they can't
+  // reach are only counted.
+  rpc GetEpicBlockers(GetEpicBlockersRequest) returns (EpicBlockers);
 
   // ── Task ↔ Doc linking (delegates to Doc Service; validates task-side access first) ──
   // ── Unified search support (unified-search-design.md §5.2) ──
@@ -354,6 +358,10 @@ message Project {
   // and chips. Absent = none chosen; clients fall back to a tint derived from the id.
   optional string color = 17;  // Navigation v2 › Members & access: members whose project role can only view may still comment on tasks.
   bool viewers_can_comment = 18;
+  // What an unfinished blocker from ANOTHER project does when one of this project's tasks is moved to a done status:
+  // "WARN" (default — the move is allowed; clients warn first) or "BLOCK" (refused, like a same-project blocker,
+  // which always blocks).
+  string cross_project_blocker_gate = 19;
 }
 
 // Wrapper so an update can say "set to this list" (even an empty one) apart from "leave unchanged".
@@ -459,6 +467,7 @@ message UpdateProjectRequest {
   optional string default_team_id = 7;   // present-empty clears (project manager)
   optional string color = 8;             // a ramp key (see Project.color); present-empty clears (project manager)
   optional bool viewers_can_comment = 9;  // project manager; absent = unchanged
+  optional string cross_project_blocker_gate = 10; // "WARN" | "BLOCK" (project manager); absent = unchanged
 }
 
 message Component {
@@ -819,6 +828,10 @@ message Task {
   optional string component_id = 26;
   // The initiative (a task of the Initiative type, in any project of the org) this epic rolls up to. Epics only.
   optional string initiative_id = 27;
+  // Dependencies may cross projects (same org). blocks/blocked_by list only tasks the caller can open; these count
+  // the rest, never naming them. Only unfinished tasks are counted.
+  int32 hidden_open_blockers = 29;  // unfinished tasks blocking this one, in projects the caller can't reach
+  int32 hidden_blocks = 30;         // unfinished tasks this one blocks, in projects the caller can't reach
 }
 
 // Lightweight reference for dependency lists — enough to render a link, never full task detail.
@@ -827,6 +840,12 @@ message TaskSummary {
   int32 task_number = 2;
   string title = 3;
   string status_id = 4;
+  // Filled on dependency lists (blocks / blocked_by, epic blockers), which may point into another project — the
+  // client can't resolve a foreign status id on its own. Empty / false elsewhere (e.g. GetTaskByReference).
+  string project_id = 5;
+  string project_key = 6;
+  bool done = 7;                    // its status is in the DONE group
+  string status_name = 8;
 }
 
 message CreateTaskRequest {
@@ -1302,6 +1321,21 @@ message UnblockTaskRequest {
   reserved "requested_by";
   string blocking_task_id = 2;
   string blocked_task_id = 3;
+}
+
+message GetEpicBlockersRequest {
+  string epic_id = 1;
+}
+
+// One open task outside the epic and what it holds up inside it.
+message EpicBlocker {
+  TaskSummary blocker = 1;          // project_key / done / status_name filled
+  repeated TaskSummary blocked = 2; // the epic itself and/or tasks under it
+}
+
+message EpicBlockers {
+  repeated EpicBlocker blockers = 1; // oldest link first
+  int32 hidden_count = 2;            // blockers in projects the caller can't reach — counted, never named
 }
 
 // ===================== Task ↔ Doc linking =====================
@@ -2566,6 +2600,8 @@ message InitiativeEpic {
   optional string due_date = 13;
   string status_group = 14;         // the epic's own status group: TODO | IN_PROGRESS | DONE
   int32 tasks_in_progress = 15;     // of tasks_total, those in an IN_PROGRESS status
+  // Unfinished tasks outside this epic that block it or a task under it (see GetEpicBlockers), hidden ones included.
+  int32 external_blockers = 16;
 }
 
 // Progress is the caller's own view: epics in projects they can't reach are only counted, and add nothing to the
@@ -2584,6 +2620,7 @@ message InitiativeRollup {
   optional string start_date = 11;  // earliest start among visible epics
   optional string due_date = 12;    // latest due among visible epics
   bool done = 13;                   // the initiative itself is in a DONE status
+  int32 blocked_epics = 14;         // visible epics with external_blockers > 0
 }
 
 message ListInitiativesResponse {
