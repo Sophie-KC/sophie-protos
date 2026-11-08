@@ -7,6 +7,7 @@ option java_package = "org.sophie.docservice.grpc";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "common/attachment_folders.proto";
 import "common/pagination.proto";
 import "common/export.proto";
 import "common/agent_via.proto";
@@ -177,6 +178,13 @@ service DocService {
   rpc LinkTask(LinkTaskRequest) returns (google.protobuf.Empty);
   rpc UnlinkTask(UnlinkTaskRequest) returns (google.protobuf.Empty);
   rpc ListLinkedTasks(ListLinkedTasksRequest) returns (ListLinkedTasksResponse);
+  // Backlinks: the pages whose current published content links to this one (a page chip or a link to its address),
+  // only those the caller can open, most recently updated first. Caller = anyone who can open the page.
+  rpc ListPageBacklinks(ListPageBacklinksRequest) returns (ListPageBacklinksResponse);
+  // Drive › Projects & spaces (common/attachment_folders.proto): the spaces (with their pages' files) the caller can open that hold files,
+  // then one folder's files grouped by owner. Read-only; nothing here grants access to anything.
+  rpc ListAttachmentFolders(.org.sophie.common.ListAttachmentFoldersRequest) returns (.org.sophie.common.ListAttachmentFoldersResponse);
+  rpc ListFolderAttachments(.org.sophie.common.ListFolderAttachmentsRequest) returns (.org.sophie.common.ListFolderAttachmentsResponse);
 
   // Batched access filter for search: given candidate page ids, return the subset the caller can actually
   // see (space access + page-level restrictions) — reuses PageAccessGuard.canAccess per id.
@@ -1038,6 +1046,15 @@ message LinkedPageSummary {
   string page_id = 1;
   string title = 2;
   string space_key = 3;
+}
+
+message ListPageBacklinksRequest {
+  string page_id = 1;
+}
+
+message ListPageBacklinksResponse {
+  repeated LinkedPageSummary pages = 1;  // at most 100
+  bool more = 2;                         // more pages link here than are listed
 }
 
 message ListDocsLinkedToTaskResponse {

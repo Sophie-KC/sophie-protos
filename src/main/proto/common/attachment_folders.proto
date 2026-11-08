@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package org.sophie.common;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.common.grpc";
+
+import "google/protobuf/timestamp.proto";
+
+// Drive › Projects & spaces (Viktor feedback #10): task and page attachments shown in Drive as read-only folders —
+// a project's tasks, a space's pages — built live from where the files already are. No copy: each file keeps its
+// task's or page's permissions, and only what the caller can open is listed. task-service and doc-service each serve:
+//   rpc ListAttachmentFolders(ListAttachmentFoldersRequest) returns (ListAttachmentFoldersResponse);   // projects / spaces
+//   rpc ListFolderAttachments(ListFolderAttachmentsRequest) returns (ListFolderAttachmentsResponse);   // one of them
+
+message ListAttachmentFoldersRequest {
+  string org_id = 1;
+}
+
+// A project (task-service) or a space (doc-service) the caller can open that has at least one attachment they can see.
+message AttachmentFolder {
+  string id = 1;                                   // project id / space id
+  string key = 2;                                  // project key / space key
+  string name = 3;
+  int32 file_count = 4;
+  int64 total_bytes = 5;
+  google.protobuf.Timestamp last_uploaded_at = 6;
+}
+
+message ListAttachmentFoldersResponse {
+  repeated AttachmentFolder folders = 1;           // most recent upload first
+}
+
+message ListFolderAttachmentsRequest {
+  string folder_id = 1;                            // project id / space id
+}
+
+// One task or page and its attachments.
+message AttachmentGroup {
+  string owner_id = 1;                             // task id / page id
+  string label = 2;                                // "WEB-12" for a task; empty for a page
+  string title = 3;
+  repeated AttachmentFile files = 4;               // newest first
+}
+
+message AttachmentFile {
+  string attachment_id = 1;
+  string file_id = 2;
+  string filename = 3;
+  string content_type = 4;
+  int64 size_bytes = 5;
+  string uploaded_by = 6;
+  google.protobuf.Timestamp uploaded_at = 7;
+}
+
+message ListFolderAttachmentsResponse {
+  string folder_key = 1;
+  string folder_name = 2;
+  repeated AttachmentGroup groups = 3;             // most recent upload first; only tasks/pages the caller can open
+  bool truncated = 4;                              // more than 2000 files: the newest are listed
+}

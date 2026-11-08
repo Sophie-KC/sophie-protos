@@ -7,6 +7,7 @@ option java_package = "org.sophie.taskservice.grpc";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "common/attachment_folders.proto";
 import "common/agent_via.proto";
 import "common/pagination.proto";
 import "common/export.proto";
@@ -150,6 +151,10 @@ service TaskService {
   rpc RemoveTaskLabel(RemoveTaskLabelRequest) returns (google.protobuf.Empty);
   rpc BlockTask(BlockTaskRequest) returns (google.protobuf.Empty);
   rpc UnblockTask(UnblockTaskRequest) returns (google.protobuf.Empty);
+  // Drive › Projects & spaces (common/attachment_folders.proto): the projects (with their tasks' files) the caller can open that hold files,
+  // then one folder's files grouped by owner. Read-only; nothing here grants access to anything.
+  rpc ListAttachmentFolders(.org.sophie.common.ListAttachmentFoldersRequest) returns (.org.sophie.common.ListAttachmentFoldersResponse);
+  rpc ListFolderAttachments(.org.sophie.common.ListFolderAttachmentsRequest) returns (.org.sophie.common.ListFolderAttachmentsResponse);
   // What holds an epic back from outside it: open tasks that are not the epic or under it, blocking the epic or one
   // of its tasks (any project of the org). Caller = a member of the epic's project; blockers in projects they can't
   // reach are only counted.
