@@ -494,6 +494,12 @@ service OrgService {
   // or when the result would leave none of chat / tasks / docs on (MODULES_EMPTY in the description).
   rpc UpdateOrgModules(UpdateOrgModulesRequest) returns (OrgModules);
 
+  // Org audit log (claude/audit-log-design.md): who did what in the org — members, roles, settings,
+  // modules, plan, API tokens and AI apps, projects and spaces, page restrictions, exports and imports.
+  // Org Admin only (the verified caller). Newest first, keyset-paged; entries older than the plan's
+  // audit.log.days are never returned.
+  rpc ListOrgAuditEvents(ListOrgAuditEventsRequest) returns (ListOrgAuditEventsResponse);
+
   // ── Chat status (design_handoff_chat_discord §2) ──
   // A person's chosen presence mode + custom status + time zone, per org. Live connection state
   // (online/idle/offline, last seen) is websocket-service's; the gateway merges the two.
@@ -2107,4 +2113,35 @@ message GetChatStatusesRequest {
 
 message GetChatStatusesResponse {
   repeated ChatStatus statuses = 1;           // only users with a stored row
+}
+
+message ListOrgAuditEventsRequest {
+  string org_id = 1;
+  .org.sophie.common.PageRequest page = 2;    // limit ≤ 100, default 50
+  string actor_user_id = 3;                   // empty = anyone
+  string action = 4;                          // empty = all; a full action ("member.removed") or a group prefix ("member.")
+  google.protobuf.Timestamp from = 5;         // inclusive; unset or older than retention = the retention floor
+  google.protobuf.Timestamp to = 6;           // exclusive; unset = now
+}
+
+message OrgAuditEvent {
+  string id = 1;
+  google.protobuf.Timestamp occurred_at = 2;
+  string actor_user_id = 3;                   // empty = the system
+  string actor_label = 4;                     // name at the time (email if none)
+  string actor_email = 5;
+  string via_kind = 6;                        // set when an AI app made the change ("oauth", "token")
+  string via_name = 7;
+  string action = 8;                          // e.g. "member.role_changed"
+  string target_type = 9;                     // e.g. "MEMBER", "PROJECT"
+  string target_id = 10;
+  string target_label = 11;
+  string details_json = 12;                   // action-specific JSON object; "" when none
+  string source_service = 13;
+}
+
+message ListOrgAuditEventsResponse {
+  repeated OrgAuditEvent events = 1;
+  .org.sophie.common.PageResponse page = 2;
+  int32 retention_days = 3;                   // the plan's audit.log.days; -1 = unlimited
 }
