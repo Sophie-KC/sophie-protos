@@ -37,6 +37,10 @@ service DocService {
   rpc SetSpaceProject(SetSpaceProjectRequest) returns (Space);              // empty project_id clears
 
   rpc CreatePage(CreatePageRequest) returns (Page);                         // requires space access
+  // A file already in file-service (Markdown, Word .docx, plain text) becomes a RICH_TEXT page with
+  // version 1 published, as the caller. The original file is attached to the page. Requires space
+  // access; INVALID_ARGUMENT for a format it cannot convert (the caller then keeps it as a file).
+  rpc ImportPage(ImportPageRequest) returns (Page);
   rpc GetPage(GetPageRequest) returns (Page);
   // Navigation v2's Docs home. Stars are per user; the starred and recent lists only ever contain pages the caller
   // can still open (re-checked on read, so a lost access drops a page silently). Recent = pages the caller opened
@@ -1319,4 +1323,13 @@ message PublicPageAttachment {
 message GetPublicPageAttachmentUrlRequest {
   string token = 1;
   string attachment_id = 2;
+}
+
+message ImportPageRequest {
+  string space_id = 1;
+  optional string parent_page_id = 2;
+  string title = 3;              // empty = first heading of the document, else the file name without extension
+  string file_id = 4;            // file-service id of the uploaded original (CONFIRMED)
+  string format = 5;             // MARKDOWN | DOCX | TEXT; empty = from the file name
+  bool attach_original = 6;      // keep the original as a page attachment
 }

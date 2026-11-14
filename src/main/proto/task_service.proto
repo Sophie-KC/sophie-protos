@@ -229,6 +229,12 @@ service TaskService {
   // Several fields in one transaction. A FieldValue with no value set CLEARS that field.
   rpc SetTaskFieldValues(SetTaskFieldValuesRequest) returns (Task);
 
+  // ── External references (claude/integrations-design-brief.md §5) ───────────────────────────
+  rpc PutTaskExternalRef(PutTaskExternalRefRequest) returns (Task);        // task write access
+  rpc DeleteTaskExternalRef(DeleteTaskExternalRefRequest) returns (Task);  // task write access
+  // NOT_FOUND when nothing matches or the caller can't open the task (never says which).
+  rpc GetTaskByExternalRef(GetTaskByExternalRefRequest) returns (Task);
+
   // ── Staff-tier (admin panel) ──────────────────────────────────────────────────────────────
   // Any active staff member or trusted internal service may call this — no live platform_staff
   // re-check, same accepted read-only trust level as every other staff-tier READ this admin-panel
@@ -837,6 +843,39 @@ message Task {
   // the rest, never naming them. Only unfinished tasks are counted.
   int32 hidden_open_blockers = 29;  // unfinished tasks blocking this one, in projects the caller can't reach
   int32 hidden_blocks = 30;         // unfinished tasks this one blocks, in projects the caller can't reach
+  // Records in other systems this task stands for (a CRM deal, an ERP order …): GetTask and CreateTask fill them;
+  // lists leave them empty. claude/integrations-design-brief.md §5.
+  repeated TaskExternalRef external_refs = 31;
+  // CreateTask with an external_ref that already names a task the caller can open returns THAT task with this set,
+  // instead of creating a second one (§6 R1). Always false elsewhere.
+  bool existing = 32;
+}
+
+// A record in another system that a task stands for. (org, system, external_id) names at most one task.
+message TaskExternalRef {
+  string system = 1;        // short slug: lower-case letters, digits, - and _, <= 40 (crm, 1c, bitrix24)
+  string external_id = 2;   // the other system's id, <= 200
+  string url = 3;           // optional link back, http(s), <= 2000
+  string label = 4;         // optional display text, <= 200 (e.g. "Deal #4512 · Acme")
+  string created_by = 5;
+  string created_at = 6;    // ISO-8601
+}
+
+message PutTaskExternalRefRequest {
+  string task_id = 1;
+  TaskExternalRef ref = 2;  // system + external_id name it; url/label are replaced
+}
+
+message DeleteTaskExternalRefRequest {
+  string task_id = 1;
+  string system = 2;
+  string external_id = 3;
+}
+
+message GetTaskByExternalRefRequest {
+  string org_id = 1;
+  string system = 2;
+  string external_id = 3;
 }
 
 // Lightweight reference for dependency lists — enough to render a link, never full task detail.
@@ -881,6 +920,12 @@ message CreateTaskRequest {
   optional string team_id = 17;
   optional string component_id = 18;
   // A component with auto_assign LEAD also assigns its lead when assignee_id is absent.
+  // Custom-field values set in the same transaction (the shape SetTaskFieldValues takes).
+  repeated FieldValue field_values = 19;
+  // The record in another system this task is for. If (org, system, external_id) already names a task the caller
+  // can open, that task is returned with Task.existing = true and nothing is created — so an integration can retry
+  // forever without duplicates. If it names a task the caller can't open, FAILED_PRECONDITION.
+  optional TaskExternalRef external_ref = 20;
 }
 
 message GetTaskRequest {

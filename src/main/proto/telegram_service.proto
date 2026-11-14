@@ -47,6 +47,13 @@ service TelegramService {
   // link in this org, the type is enabled, and (when scope_type is set) the scope is enabled.
   // Presence ("only when away") is NOT checked here — that happens at send time in this service.
   rpc ShouldDeliver(ShouldDeliverRequest) returns (ShouldDeliverResponse);
+
+  // ── Group bindings (claude/telegram-groups-design.md): a Telegram group or forum topic that feeds a
+  // project. Created in Telegram with /connect; listed and changed here. Org Admins see every binding of
+  // the org; anyone else gets PERMISSION_DENIED.
+  rpc ListGroupBindings(ListGroupBindingsRequest) returns (ListGroupBindingsResponse);
+  rpc UpdateGroupBinding(UpdateGroupBindingRequest) returns (GroupBinding);
+  rpc DeleteGroupBinding(DeleteGroupBindingRequest) returns (google.protobuf.Empty);
 }
 
 message CreateLinkCodeRequest {
@@ -203,4 +210,44 @@ message TelegramLinkChangedEvent {
   string status = 2;                          // ACTIVE | UNLINKED | BLOCKED
   string org_id = 3;
   string username = 4;
+}
+
+message GroupBinding {
+  string id = 1;
+  string org_id = 2;
+  int64 chat_id = 3;
+  int64 thread_id = 4;           // 0 = the whole group (no forum topic)
+  string chat_title = 5;
+  string topic_title = 6;
+  string project_id = 7;
+  string capture_mode = 8;       // TOPIC | TAGGED | MANUAL
+  repeated string tags = 9;      // extra task tags for TAGGED, without '#'
+  bool post_updates = 10;        // bot reactions on the original message (👀 taken, ✅ done)
+  string created_by = 11;        // internal user id of the admin who ran /connect
+  google.protobuf.Timestamp created_at = 12;
+  bool disabled = 13;            // bot removed or demoted; tasks stop until it is fixed
+  int32 task_count = 14;
+}
+
+message ListGroupBindingsRequest {
+  string org_id = 1;
+}
+
+message ListGroupBindingsResponse {
+  repeated GroupBinding bindings = 1;
+}
+
+message UpdateGroupBindingRequest {
+  string org_id = 1;
+  string binding_id = 2;
+  optional string project_id = 3;
+  optional string capture_mode = 4;
+  repeated string tags = 5;
+  bool set_tags = 6;             // tags is applied only when true (an empty list clears them)
+  optional bool post_updates = 7;
+}
+
+message DeleteGroupBindingRequest {
+  string org_id = 1;
+  string binding_id = 2;
 }

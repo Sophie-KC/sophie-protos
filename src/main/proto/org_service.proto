@@ -338,6 +338,21 @@ service OrgService {
   // revoking org access actually revokes programmatic access too.
   rpc ValidateApiToken(ValidateApiTokenRequest) returns (ValidateApiTokenResponse);
 
+  // Integration accounts (claude/integrations-design-brief.md §3): non-human members an Org Admin creates for another
+  // system (an ERP, a CRM …). Each is a real org member with an org role, so every access check applies to it as to a
+  // person; it has no sign-in, holds no seat, and its API tokens outlive the admin who made them. Org Admin only.
+  rpc ListIntegrationAccounts(ListIntegrationAccountsRequest) returns (ListIntegrationAccountsResponse);
+  rpc CreateIntegrationAccount(CreateIntegrationAccountRequest) returns (IntegrationAccount);
+  rpc UpdateIntegrationAccount(UpdateIntegrationAccountRequest) returns (IntegrationAccount);
+  // Revokes every token, ends the membership; what it wrote stays, shown under its name.
+  rpc DeleteIntegrationAccount(DeleteIntegrationAccountRequest) returns (google.protobuf.Empty);
+  rpc CreateIntegrationToken(CreateIntegrationTokenRequest) returns (CreateApiTokenResponse);
+  rpc RevokeIntegrationToken(RevokeIntegrationTokenRequest) returns (google.protobuf.Empty);
+  // Service-to-service (SP): get or create the org's built-in integration account for a channel such as
+  // "telegram" — the author of tasks whose real sender has no Sofia account. Member role, no tokens,
+  // idempotent per (org, system); shows in Settings › Integrations like any other account.
+  rpc EnsureSystemIntegrationAccount(EnsureSystemIntegrationAccountRequest) returns (IntegrationAccount);
+
   // Device sessions (desktop-implementation-design.md §12.2) — one row per signed-in client install
   // (desktop, mobile, web). Same identity rule as the API-token RPCs: the owner is always
   // SophieSecurityContext.currentInternalUserId() (the caller's forwarded, verified JWT), never a
@@ -663,6 +678,7 @@ message OrgMember {
   // their org role is a guest role (the same rule the role's own is_guest flag / label uses).
   repeated string team_ids = 11;
   bool is_guest = 12;
+  bool integration = 13;     // an integration account — only in SearchOrgMembers with include_integrations
 }
 
 message ListOrgMembersResponse {
@@ -672,6 +688,8 @@ message ListOrgMembersResponse {
 message SearchOrgMembersRequest {
   string org_id = 1;
   string query = 2;        // free-text, matched against name/email
+  // Integration accounts are left out of people pickers unless asked for (e.g. adding one to a project).
+  bool include_integrations = 4;
   reserved 3; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
 }
@@ -791,6 +809,7 @@ message UserSummary {
   string first_name = 3;
   string last_name = 4;
   string avatar_version = 5; // empty = no avatar set; frontend renders the monogram
+  bool integration = 6;      // an integration account (a system, not a person) — show the badge, no mentions
 }
 
 message BatchGetUsersResponse {
@@ -1576,6 +1595,62 @@ message ValidateApiTokenResponse {
   string token_id = 7;     // for the AI-app connection record (app id "pat:<token_id>")
   string token_name = 8;
   // scopes (field 4) are already capped by the owner's CURRENT role (claude/mcp-design.md §16).
+  // The token belongs to an integration account (a system, not a person): it is not an AI app, so the
+  // ai_agents switch and the AI-app policy don't apply to it; the route allowlist and scopes still do.
+  bool integration = 9;
+}
+
+message IntegrationAccount {
+  string id = 1;                 // the account's user id (users.id) — what activity and assignees show
+  string org_id = 2;
+  string name = 3;               // <= 80
+  string description = 4;        // <= 500
+  string role_id = 5;            // its ORG-scope role (never the Org Admin role)
+  string role_name = 6;
+  string created_by = 7;
+  google.protobuf.Timestamp created_at = 8;
+  repeated ApiTokenSummary tokens = 9;  // live (unrevoked) tokens
+}
+
+message ListIntegrationAccountsRequest {
+  string org_id = 1;
+}
+
+message ListIntegrationAccountsResponse {
+  repeated IntegrationAccount accounts = 1;
+}
+
+message CreateIntegrationAccountRequest {
+  string org_id = 1;
+  string name = 2;
+  string description = 3;
+  string role_id = 4;            // empty = the org's default member role
+}
+
+message UpdateIntegrationAccountRequest {
+  string org_id = 1;
+  string account_id = 2;
+  optional string name = 3;
+  optional string description = 4;
+  optional string role_id = 5;
+}
+
+message DeleteIntegrationAccountRequest {
+  string org_id = 1;
+  string account_id = 2;
+}
+
+message CreateIntegrationTokenRequest {
+  string org_id = 1;
+  string account_id = 2;
+  string name = 3;
+  repeated string scopes = 4;    // capped by the ACCOUNT's role, like a person's token
+  optional string expires_at = 5;
+}
+
+message RevokeIntegrationTokenRequest {
+  string org_id = 1;
+  string token_id = 2;
 }
 
 message RegisterDeviceRequest {
@@ -2230,4 +2305,10 @@ message ImportSalesLeadsRequest {
 message ImportSalesLeadsResponse {
   int32 created = 1;
   int32 updated = 2;
+}
+
+message EnsureSystemIntegrationAccountRequest {
+  string org_id = 1;
+  string system = 2;             // "telegram"
+  string display_name = 3;       // "Telegram" — used only when the account is created
 }
