@@ -997,6 +997,7 @@ message DemoSandbox {
 message StartDemoSandboxRequest {
   string client_ip_hash = 1;               // hashed by the Gateway; only ever compared, for the per-IP live cap
   string locale = 2;                       // en | ru | uz; names the guest and the org
+  string contact_email = 3;                // optional: an address the visitor chose to leave; "" when none. Validated by the Gateway.
 }
 
 message DemoPersonaSession {
