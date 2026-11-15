@@ -280,6 +280,20 @@ service OrgService {
   // never satisfy. Unpaged, like ListOrgMembers; org_id is the org looked at, never the caller's.
   rpc ListOrgMembersForStaff(ListOrgMembersRequest) returns (ListOrgMembersResponse);
 
+  // ── Sales leads (admin panel's Sales screen, 2026-11-15) ───────────────────────────────────────
+  // Staff-tier, any active staff role. The founding-customer outreach list that used to live in
+  // claude/marketing/sales-kit/tracker.csv: one row per company. company/stage/priority are typed;
+  // every other tracker column rides in `fields`, so the screen can show, hide and sort any of them.
+  rpc ListSalesLeadsForStaff(ListSalesLeadsRequest) returns (ListSalesLeadsResponse);
+  rpc GetSalesLeadForStaff(GetSalesLeadRequest) returns (SalesLeadDetail);
+  // id empty = create. A company name already used by another lead is ALREADY_EXISTS.
+  rpc UpsertSalesLeadForStaff(UpsertSalesLeadRequest) returns (SalesLead);
+  rpc DeleteSalesLeadForStaff(DeleteSalesLeadRequest) returns (google.protobuf.Empty);
+  rpc AddSalesLeadNoteForStaff(AddSalesLeadNoteRequest) returns (SalesLeadDetail);
+  // Upsert many rows matched by company name (case-insensitive): new companies are created, existing
+  // ones get the sent fields merged over theirs. For loading a CSV export.
+  rpc ImportSalesLeadsForStaff(ImportSalesLeadsRequest) returns (ImportSalesLeadsResponse);
+
   // ── Platform staff management (admin-panel-design-prompt.md's Staff screen) ─────────────────
   // Staff-tier, PLATFORM_ADMIN only (org-service enforces the role itself — never trust a
   // caller-supplied role). The caller's own identity comes from the gRPC principal
@@ -2145,4 +2159,75 @@ message ListOrgAuditEventsResponse {
   repeated OrgAuditEvent events = 1;
   .org.sophie.common.PageResponse page = 2;
   int32 retention_days = 3;                   // the plan's audit.log.days; -1 = unlimited
+}
+
+// ── Sales leads ───────────────────────────────────────────────────────────────────────────────
+
+message SalesLead {
+  string id = 1;
+  string company = 2;
+  // listed | messaged | replied | demo | trial | yes | paid | later | no
+  string stage = 3;
+  // A | B | C, or empty
+  string priority = 4;
+  // Every other column, keyed by the tracker's snake_case header (name, role, channel, next_step_date…).
+  map<string, string> fields = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+  // Email of the staff member who last changed the row; empty for imported rows never edited.
+  string updated_by = 8;
+  int32 note_count = 9;
+}
+
+message SalesLeadNote {
+  string id = 1;
+  string body = 2;
+  string author = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message SalesLeadDetail {
+  SalesLead lead = 1;
+  // Newest first.
+  repeated SalesLeadNote notes = 2;
+}
+
+message ListSalesLeadsRequest {}
+
+message ListSalesLeadsResponse {
+  repeated SalesLead leads = 1;
+}
+
+message GetSalesLeadRequest {
+  string id = 1;
+}
+
+message SalesLeadInput {
+  string company = 1;
+  string stage = 2;
+  string priority = 3;
+  map<string, string> fields = 4;
+}
+
+message UpsertSalesLeadRequest {
+  string id = 1;
+  SalesLeadInput lead = 2;
+}
+
+message DeleteSalesLeadRequest {
+  string id = 1;
+}
+
+message AddSalesLeadNoteRequest {
+  string lead_id = 1;
+  string body = 2;
+}
+
+message ImportSalesLeadsRequest {
+  repeated SalesLeadInput leads = 1;
+}
+
+message ImportSalesLeadsResponse {
+  int32 created = 1;
+  int32 updated = 2;
 }
