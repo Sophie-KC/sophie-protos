@@ -1,0 +1,336 @@
+syntax = "proto3";
+
+package com.platform.staffcrm.v1;
+
+option java_multiple_files = true;
+option java_package = "org.sophie.staffcrm.grpc";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Sales CRM v2 (claude/sales-crm-v2-design.md): the admin panel's founder-led B2B CRM — companies, contacts,
+// interactions, deals, follow-up tasks, notes, qualification. Served by org-service (its own tables beside the
+// legacy sales_leads, which this never modifies). Platform staff only: every RPC re-checks the caller's live
+// platform_staff row (StaffAuth). Enumerations are lower-case strings, validated server-side (INVALID_ARGUMENT).
+//
+// Dates the tracker only knew as days carry precision "date" (shown as a day, stored at 00:00 Asia/Tashkent);
+// "datetime" when a time is known.
+service StaffCrmService {
+  // ── Import of the legacy list (sales_leads) ──
+  // Dry run: what an import would create, skip and warn about. Writes nothing (but records the run).
+  rpc PreviewLegacyImport(google.protobuf.Empty) returns (ImportRun);
+  // Imports every lead not imported yet; idempotent (re-running skips imported leads and says so).
+  rpc ApplyLegacyImport(google.protobuf.Empty) returns (ImportRun);
+  // Deletes what one applied run created and nobody has edited since; the rest is listed in the result.
+  rpc RollbackLegacyImport(RollbackImportRequest) returns (ImportRun);
+  rpc ListImportRuns(google.protobuf.Empty) returns (ListImportRunsResponse);
+
+  // ── Companies ──
+  // Every company with the derived columns the list and queue need (last contact, next action, open deal …).
+  rpc ListCompanies(google.protobuf.Empty) returns (ListCompaniesResponse);
+  rpc GetCompany(GetCompanyRequest) returns (CompanyDetail);
+  // id empty = create. A name already used by another company is ALREADY_EXISTS.
+  rpc UpsertCompany(UpsertCompanyRequest) returns (CompanyDetail);
+
+  // ── Children of a company (each returns the refreshed CompanyDetail) ──
+  rpc UpsertContact(UpsertContactRequest) returns (CompanyDetail);
+  rpc DeleteContact(DeleteChildRequest) returns (CompanyDetail);
+  rpc UpsertInteraction(UpsertInteractionRequest) returns (CompanyDetail);
+  rpc DeleteInteraction(DeleteChildRequest) returns (CompanyDetail);
+  // Closed Won needs agreement_confirmed and payment_status "paid" (FAILED_PRECONDITION otherwise).
+  rpc UpsertDeal(UpsertDealRequest) returns (CompanyDetail);
+  rpc MoveDeal(MoveDealRequest) returns (CompanyDetail);
+  rpc UpsertTask(UpsertTaskRequest) returns (CompanyDetail);
+  // complete / defer / cancel / reopen / reschedule in one call; the activity log keeps the old due date.
+  rpc ChangeTask(ChangeTaskRequest) returns (CompanyDetail);
+  rpc AddNote(AddNoteRequest) returns (CompanyDetail);
+  rpc SetQualification(SetQualificationRequest) returns (CompanyDetail);
+
+  // ── Qualification criteria (configurable scoring) ──
+  rpc ListQualificationCriteria(google.protobuf.Empty) returns (ListQualificationCriteriaResponse);
+  rpc UpsertQualificationCriterion(QualificationCriterion) returns (ListQualificationCriteriaResponse);
+}
+
+// ── Import ──
+
+message ImportRun {
+  string id = 1;
+  bool dry_run = 2;
+  google.protobuf.Timestamp created_at = 3;
+  string actor = 4;                    // staff email
+  string kind = 5;                     // preview | apply | rollback
+  string rolled_back_by = 6;           // id of the rollback run, if any
+  // The report, as JSON (counts, stage mapping, warnings per lead, unmapped keys): shown as is by the admin screen.
+  string report_json = 7;
+}
+
+message RollbackImportRequest {
+  string run_id = 1;
+}
+
+message ListImportRunsResponse {
+  repeated ImportRun runs = 1;         // newest first
+}
+
+// ── Entities ──
+
+message Company {
+  string id = 1;
+  string name = 2;
+  string website = 3;
+  string segment = 4;
+  string country = 5;
+  string city = 6;
+  optional int32 team_size_min = 7;
+  optional int32 team_size_max = 8;
+  string team_size_text = 9;           // as written (estimate, range)
+  string it_park_status = 10;          // verified | unverified | unknown
+  string description = 11;
+  repeated string current_tools = 12;
+  string pain_points = 13;
+  string priority = 14;                // A | B | C | ""
+  string owner_staff_id = 15;
+  string owner_email = 16;
+  string source = 17;
+  string source_url = 18;
+  string status = 19;                  // active | disqualified | competitor | customer | on_hold
+  string disqualification_reason = 20;
+  bool free_pilot = 21;                // a permanently free pilot team: never a customer, never revenue
+  int32 qualification_score = 22;      // verified points only, 0–100
+  string qualification_grade = 23;     // A | B | C from the score
+  string legacy_lead_id = 24;          // the sales_leads row it came from, if any
+  string raw_json = 25;                // the legacy row's original fields, verbatim
+  google.protobuf.Timestamp created_at = 26;
+  google.protobuf.Timestamp updated_at = 27;
+  string updated_by = 28;
+}
+
+message Contact {
+  string id = 1;
+  string company_id = 2;
+  string full_name = 3;
+  string position = 4;
+  string decision_role = 5;            // decision_maker | influencer | gatekeeper | unknown
+  string language = 6;                 // uz | ru | en | ""
+  string telegram_username = 7;
+  string telegram_url = 8;
+  string linkedin_url = 9;
+  string phone = 10;
+  string email = 11;
+  string source = 12;
+  string introduced_by_contact_id = 13;
+  string notes = 14;
+}
+
+message Interaction {
+  string id = 1;
+  string company_id = 2;
+  string contact_id = 3;
+  string channel = 4;                  // telegram | linkedin_inmail | linkedin_dm | phone | email | meeting | other
+  string direction = 5;                // outbound | inbound
+  string type = 6;                     // first_outreach | follow_up | reply | discovery | demo | negotiation | other
+  google.protobuf.Timestamp occurred_at = 7;
+  string occurred_precision = 8;       // date | datetime
+  string summary = 9;
+  string message_state = 10;           // sent | unread | read | replied | unknown
+  string outcome = 11;
+  string url = 12;
+  string created_by = 13;
+  bool imported = 14;                  // created by the legacy import
+}
+
+message Deal {
+  string id = 1;
+  string company_id = 2;
+  string primary_contact_id = 3;
+  string kind = 4;                     // commercial | free_pilot
+  string stage = 5;                    // see DEAL_STAGES in org-service CrmRules
+  optional int32 seats = 6;
+  optional int64 price_per_seat = 7;   // UZS, whole so'm
+  string billing_period = 8;           // monthly | annual
+  int64 estimated_mrr = 9;             // derived: seats × monthly price (annual price / 12); 0 when unknown
+  int64 estimated_acv = 10;            // derived: estimated_mrr × 12
+  string expected_close_date = 11;     // YYYY-MM-DD or ""
+  optional int32 probability = 12;     // an estimate, 0–100
+  string motivation = 13;
+  string objections = 14;
+  string competitor = 15;
+  string next_step = 16;
+  string lost_reason = 17;
+  google.protobuf.Timestamp closed_at = 18;
+  bool agreement_confirmed = 19;
+  string payment_status = 20;          // none | invoiced | paid
+  google.protobuf.Timestamp created_at = 21;
+  google.protobuf.Timestamp updated_at = 22;
+}
+
+message Task {
+  string id = 1;
+  string company_id = 2;
+  string contact_id = 3;
+  string deal_id = 4;
+  string type = 5;                     // follow_up | discovery_call | demo | proposal | onboarding | research | other
+  string description = 6;
+  google.protobuf.Timestamp due_at = 7; // unset = no due date yet
+  string due_precision = 8;            // date | datetime
+  google.protobuf.Timestamp original_due_at = 9;
+  string priority = 10;                // high | normal | low
+  string status = 11;                  // pending | completed | cancelled | deferred
+  google.protobuf.Timestamp completed_at = 12;
+  string outcome = 13;
+  string owner_staff_id = 14;
+  string owner_email = 15;
+  google.protobuf.Timestamp created_at = 16;
+}
+
+message Note {
+  string id = 1;
+  string company_id = 2;
+  string kind = 3;                     // research | objection | competitor | feedback | general | legacy
+  string body = 4;
+  string author = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// One entry of the audit trail: what changed, by whom (and through which token), before → after.
+message Activity {
+  string id = 1;
+  string entity_type = 2;              // company | contact | interaction | deal | task | note | qualification
+  string entity_id = 3;
+  string action = 4;                   // created | updated | deleted | stage_changed | rescheduled | completed | …
+  string summary = 5;                  // human-readable, e.g. "stage Contacted → Engaged"
+  string before_json = 6;
+  string after_json = 7;
+  string actor = 8;
+  string via = 9;                      // "Claude (API token)" for a token's call, else ""
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message QualificationCriterion {
+  string key = 1;                      // e.g. team_size_10_50
+  string label = 2;
+  int32 points = 3;
+  int32 sort = 4;
+  bool active = 5;
+}
+
+message QualificationItem {
+  string criterion_key = 1;
+  string status = 2;                   // unknown | unverified | verified | no
+  string evidence = 3;
+  string source_url = 4;
+  int32 points = 5;                    // what it scores now (only verified items score)
+  string updated_by = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// A row of the companies list: the company plus what the list, queue and board need, computed server-side.
+message CompanySummary {
+  Company company = 1;
+  int32 contact_count = 2;
+  string primary_contact_name = 3;
+  string primary_contact_telegram = 4; // a t.me URL or ""
+  string primary_contact_linkedin = 5;
+  google.protobuf.Timestamp last_contacted_at = 6;   // latest outbound interaction
+  google.protobuf.Timestamp last_response_at = 7;    // latest inbound interaction
+  string last_interaction_summary = 8;
+  string last_interaction_channel = 9;
+  string last_message_state = 10;
+  google.protobuf.Timestamp last_interaction_at = 11;
+  string last_interaction_precision = 12;
+  string open_deal_id = 13;
+  string open_deal_stage = 14;
+  string open_deal_kind = 15;
+  int64 open_deal_estimated_mrr = 16;
+  string next_task_id = 17;            // the earliest pending task
+  string next_task_description = 18;
+  google.protobuf.Timestamp next_task_due_at = 19;
+  string next_task_due_precision = 20;
+  string next_task_priority = 21;
+  int32 pending_task_count = 22;
+  bool has_referral = 23;              // a contact introduced by someone
+}
+
+message ListCompaniesResponse {
+  repeated CompanySummary companies = 1;
+  repeated QualificationCriterion criteria = 2;
+}
+
+message CompanyDetail {
+  CompanySummary summary = 1;
+  repeated Contact contacts = 2;
+  repeated Interaction interactions = 3;   // newest first
+  repeated Deal deals = 4;
+  repeated Task tasks = 5;
+  repeated Note notes = 6;                 // newest first
+  repeated QualificationItem qualification = 7;
+  repeated Activity activity = 8;          // newest first, at most 200
+  repeated QualificationCriterion criteria = 9;
+}
+
+// ── Requests ──
+
+message GetCompanyRequest {
+  string id = 1;
+}
+
+message UpsertCompanyRequest {
+  Company company = 1;                 // id empty = create; derived/read-only fields are ignored
+}
+
+message UpsertContactRequest {
+  Contact contact = 1;
+}
+
+message DeleteChildRequest {
+  string company_id = 1;
+  string id = 2;
+}
+
+message UpsertInteractionRequest {
+  Interaction interaction = 1;
+  // Optional follow-up to schedule with the interaction (one-step "log and schedule").
+  Task follow_up = 2;
+}
+
+message UpsertDealRequest {
+  Deal deal = 1;
+}
+
+message MoveDealRequest {
+  string company_id = 1;
+  string deal_id = 2;
+  string stage = 3;
+  string lost_reason = 4;              // required when moving to closed_lost
+}
+
+message UpsertTaskRequest {
+  Task task = 1;
+}
+
+message ChangeTaskRequest {
+  string company_id = 1;
+  string task_id = 2;
+  string action = 3;                   // complete | defer | cancel | reopen | reschedule
+  string outcome = 4;                  // complete: what happened
+  google.protobuf.Timestamp due_at = 5; // reschedule / defer: the new due date
+  string due_precision = 6;
+}
+
+message AddNoteRequest {
+  string company_id = 1;
+  string kind = 2;
+  string body = 3;
+}
+
+message SetQualificationRequest {
+  string company_id = 1;
+  string criterion_key = 2;
+  string status = 3;
+  string evidence = 4;
+  string source_url = 5;
+}
+
+message ListQualificationCriteriaResponse {
+  repeated QualificationCriterion criteria = 1;
+}
