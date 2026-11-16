@@ -46,6 +46,11 @@ service StaffCrmService {
   rpc AddNote(AddNoteRequest) returns (CompanyDetail);
   rpc SetQualification(SetQualificationRequest) returns (CompanyDetail);
 
+  // ── Dashboard ──
+  // KPIs, Today's sales queue and the activity reports, computed from the records (never estimated where a fact is
+  // asked for). Read-only.
+  rpc GetSalesDashboard(google.protobuf.Empty) returns (SalesDashboard);
+
   // ── Qualification criteria (configurable scoring) ──
   rpc ListQualificationCriteria(google.protobuf.Empty) returns (ListQualificationCriteriaResponse);
   rpc UpsertQualificationCriterion(QualificationCriterion) returns (ListQualificationCriteriaResponse);
@@ -329,6 +334,12 @@ message SetQualificationRequest {
   string status = 3;
   string evidence = 4;
   string source_url = 5;
+}
+
+message SalesDashboard {
+  string today = 1;                    // YYYY-MM-DD, Asia/Tashkent
+  // { kpis, queue, reports } — shape documented in org-service CrmDashboard; rendered by the admin screen.
+  string dashboard_json = 2;
 }
 
 message ListQualificationCriteriaResponse {
