@@ -293,6 +293,21 @@ service OrgService {
   // Upsert many rows matched by company name (case-insensitive): new companies are created, existing
   // ones get the sent fields merged over theirs. For loading a CSV export.
   rpc ImportSalesLeadsForStaff(ImportSalesLeadsRequest) returns (ImportSalesLeadsResponse);
+  // Partial update (2026-11-16, claude/staff-sales-tokens-design.md): the lead is named by id OR company
+  // (case-insensitive exact). stage/priority change only when sent; set_fields are merged over the lead's own,
+  // clear_fields removed — every other field is kept. With a staff API token this also logs a note.
+  rpc UpdateSalesLeadForStaff(UpdateSalesLeadRequest) returns (SalesLeadDetail);
+
+  // ── Staff API tokens (2026-11-16, claude/staff-sales-tokens-design.md) ──────────────────────────
+  // A platform staff member's own bearer tokens (`sophie_staff_…`) for scripts and AI tools, limited to scopes
+  // (sales:read, sales:write). Create/List/Revoke: staff JWT, the caller's own tokens only; the plaintext is
+  // returned once and only its sha256 is stored. ValidateStaffApiToken: SERVICE tier, api-gateway's filter, by hash.
+  // A token's calls then reach org-service as the gateway (internal secret) plus the x-staff-token-hash header,
+  // which org-service re-checks on every sales RPC against the live token and staff rows.
+  rpc CreateStaffApiToken(CreateStaffApiTokenRequest) returns (CreateApiTokenResponse);
+  rpc ListStaffApiTokens(google.protobuf.Empty) returns (ListStaffApiTokensResponse);
+  rpc RevokeStaffApiToken(RevokeApiTokenRequest) returns (google.protobuf.Empty);
+  rpc ValidateStaffApiToken(ValidateStaffApiTokenRequest) returns (ValidateStaffApiTokenResponse);
 
   // ── Platform staff management (admin-panel-design-prompt.md's Staff screen) ─────────────────
   // Staff-tier, PLATFORM_ADMIN only (org-service enforces the role itself — never trust a
@@ -2305,6 +2320,39 @@ message ImportSalesLeadsRequest {
 message ImportSalesLeadsResponse {
   int32 created = 1;
   int32 updated = 2;
+}
+
+message UpdateSalesLeadRequest {
+  string id = 1;                       // either id
+  string company = 2;                  // or the company name (case-insensitive exact)
+  optional string stage = 3;
+  optional string priority = 4;        // "" clears it
+  map<string, string> set_fields = 5;  // merged over the lead's own fields
+  repeated string clear_fields = 6;    // removed from the lead's fields
+  string note = 7;                     // optional; added to the lead's log
+}
+
+message CreateStaffApiTokenRequest {
+  string name = 1;
+  repeated string scopes = 2;           // sales:read, sales:write
+  optional string expires_at = 3;       // ISO-8601 instant; unset = no expiry
+}
+
+message ListStaffApiTokensResponse {
+  repeated ApiTokenSummary tokens = 1;  // live (unrevoked, unexpired) tokens of the caller
+}
+
+message ValidateStaffApiTokenRequest {
+  string token_hash = 1;                // sha256 hex of the presented token
+}
+
+message ValidateStaffApiTokenResponse {
+  bool valid = 1;
+  string staff_id = 2;
+  string staff_email = 3;
+  repeated string scopes = 4;
+  string token_id = 5;
+  string token_name = 6;
 }
 
 message EnsureSystemIntegrationAccountRequest {
