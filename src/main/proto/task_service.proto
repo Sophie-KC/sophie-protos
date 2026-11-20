@@ -248,6 +248,13 @@ service TaskService {
   // the verified principal (USER or a telegram-service ASSERTED_USER, see PRINCIPAL_TIERS.md).
   rpc ListMyOpenTasks(ListMyOpenTasksRequest) returns (ListMyOpenTasksResponse);
 
+  // ── Telegram (/report, claude/telegram-bot-v2-design.md §4) ─────────────────────────────────────
+  // One member's workload in an org: counts per status category, done in the last 7 days, overdue, and the
+  // longest-in-progress / most-overdue open tasks. Who may ask: the member themself (projects they can open),
+  // an org admin (every project), a project admin (only the projects they administer). Anyone else, or a
+  // project_id outside that set, is PERMISSION_DENIED. Caller = verified principal (USER or ASSERTED_USER).
+  rpc GetMemberWorkload(GetMemberWorkloadRequest) returns (GetMemberWorkloadResponse);
+
   // ── Project templates + features (claude/project-templates-design.md) ──
   // A template is a SEED, not a type: CreateProject.template_key writes statuses, transitions, task
   // types and a feature set into an ordinary project. Behaviour afterwards follows the features only.
@@ -1677,6 +1684,33 @@ message MyOpenTask {
 
 message ListMyOpenTasksResponse {
   repeated MyOpenTask tasks = 1;
+}
+
+message GetMemberWorkloadRequest {
+  string org_id = 1;
+  string member_id = 2;                       // empty = the caller
+  optional string project_id = 3;             // narrow to one project
+  string time_zone = 4;                       // IANA zone for "overdue" and the 7-day window; empty = UTC
+}
+
+message WorkloadTask {
+  string task_id = 1;
+  string project_key = 2;
+  int32 task_number = 3;
+  string title = 4;
+  string status_name = 5;
+  string due_date = 6;                                  // ISO yyyy-MM-dd, empty = none
+  google.protobuf.Timestamp status_entered_at = 7;      // when it entered its current status; unset = unknown
+}
+
+message GetMemberWorkloadResponse {
+  int32 todo = 1;                             // open tasks in a TODO-category status
+  int32 in_progress = 2;                      // open tasks in an IN_PROGRESS-category status
+  int32 done_last_7_days = 3;                 // entered a DONE status in the last 7 days and still done
+  int32 overdue = 4;                          // not done, due date before today
+  repeated WorkloadTask longest_in_progress = 5;   // at most 5, longest in status first
+  repeated WorkloadTask most_overdue = 6;          // at most 5, oldest due date first
+  int32 project_count = 7;                    // projects counted (the access-limited set)
 }
 
 // ===================== Notification Service integration =====================
