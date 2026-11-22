@@ -29,8 +29,8 @@ service OrgService {
   // SERVICE-tier allowlist), unlike SignUp which is SERVICE-tier since no user JWT exists yet there.
   rpc CompleteFederatedSignUp(CompleteFederatedSignUpRequest) returns (Organization);
   // Admin-provisioned org member: creates the Keycloak user (if new), the membership, and the role
-  // assignment immediately, and triggers Keycloak's activation email for brand-new users. Requires
-  // requested_by to be org_id's Org Admin.
+  // assignment immediately, and triggers Keycloak's activation email for brand-new users (or, with
+  // initial_password, a ready account with no email). Requires requested_by to be org_id's Org Admin.
   rpc CreateOrgMember(CreateOrgMemberRequest) returns (OrganizationMembership);
   // Lists all members of an org with their role + activation status. requested_by must be Org Admin.
   rpc ListOrgMembers(ListOrgMembersRequest) returns (ListOrgMembersResponse);
@@ -670,6 +670,15 @@ message CreateOrgMemberRequest {
   string role_id = 5;      // must be an existing role in this org
   reserved 6; // was: requested_by (phase-2 identity field, deleted)
   reserved "requested_by";
+  // Admin-set password ("ready account"): when present and the email has no account yet, the account is
+  // created with this password and first/last name, the address marked verified, the member's welcome
+  // (name) step marked done, and NO activation email is sent. Requires first_name and last_name. Ignored
+  // for an email that already has an account: that person keeps their own password (see
+  // OrganizationMembership.existing_account). The realm's password policy applies (INVALID_ARGUMENT).
+  optional string initial_password = 7;
+  // With initial_password: true makes it a one-time password Keycloak asks them to replace at their first
+  // sign-in; false lets them keep it (they can still change it later).
+  bool require_password_change = 8;
 }
 
 message ListOrgMembersRequest {
@@ -989,6 +998,9 @@ message OrganizationMembership {
   // org_members.joined_at — added for the admin panel's Users lookup screen (ListOrgMembershipsForStaff
   // above); ListMyOrganizations' own existing caller never needed it.
   google.protobuf.Timestamp joined_at = 4;
+  // CreateOrgMember only: true when the email already had an account, which was linked into the org as is
+  // (no new account, no email, initial_password not applied). False everywhere else.
+  bool existing_account = 5;
 }
 
 message UpdateOrganizationRequest {
