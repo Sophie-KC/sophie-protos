@@ -35,6 +35,11 @@ service FileService {
   rpc AttachFileReference(AttachFileReferenceRequest) returns (google.protobuf.Empty);
   // Short-lived presigned GET URL for an ACTIVE file. Caller has already authorized the access.
   rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
+  // Batch of GetFile (+ GetDownloadUrl) for a page of chat messages: one call, one membership check per
+  // distinct org instead of two RPCs and two session checks per attachment. Same rule as GetDownloadUrl:
+  // the caller must be an org member of every file's own org (PERMISSION_DENIED otherwise). Unknown ids
+  // are left out of the reply; a file that isn't ACTIVE comes back with an empty download_url.
+  rpc GetFilesForDownload(GetFilesForDownloadRequest) returns (GetFilesForDownloadResponse);
   // SERVICE tier only. Same URL as GetDownloadUrl, but authorized like StreamFileContent — by
   // expected_org_id alone — for a caller with no org-member identity to forward: drive-service serving
   // an anonymous visitor's public share link (drive-design.md §5). Always attachment, never inline.
@@ -171,6 +176,21 @@ message GetDownloadUrlRequest {
   // dedup keeps the FIRST uploader's name, so a caller with its own name for the file (Drive) passes it
   // here. Ignored when inline=true.
   string download_file_name = 3;
+}
+
+message GetFilesForDownloadRequest {
+  repeated string file_ids = 1;     // duplicates are fine; each file comes back once
+  bool with_download_url = 2;       // false = metadata only
+}
+
+message FileForDownload {
+  File file = 1;
+  string download_url = 2;          // empty when not asked for, or the file isn't ACTIVE
+  int32 expires_in_seconds = 3;
+}
+
+message GetFilesForDownloadResponse {
+  repeated FileForDownload files = 1;
 }
 
 message GetDownloadUrlForServiceRequest {
