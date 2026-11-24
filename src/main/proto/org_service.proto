@@ -41,6 +41,10 @@ service OrgService {
   // scope and any PROJECT/SPACE/CHANNEL scope) and deletes the membership row. requested_by must be
   // org_id's Org Admin. FAILED_PRECONDITION if the target is the org's last Org Admin.
   rpc RemoveOrgMember(RemoveOrgMemberRequest) returns (google.protobuf.Empty);
+  // Sends a fresh activation email (set your password + verify the address) to a member who is still
+  // PENDING_ACTIVATION — e.g. their first link expired. requested_by (the caller) must be org_id's Org Admin.
+  // FAILED_PRECONDITION if the member has already activated; NOT_FOUND if they aren't a member of org_id.
+  rpc ResendActivationEmail(ResendActivationEmailRequest) returns (google.protobuf.Empty);
   // Changes a member's ORG-scope role: atomically revokes their current ORG-scope assignment(s) in
   // this org and assigns the new role. requested_by must be org_id's Org Admin. FAILED_PRECONDITION
   // if this would leave the org without an Org Admin.
@@ -720,6 +724,11 @@ message SearchOrgMembersRequest {
 
 message SearchOrgMembersResponse {
   repeated OrgMember members = 1; // reuses OrgMember; capped, active-only
+}
+
+message ResendActivationEmailRequest {
+  string org_id = 1;
+  string user_id = 2; // the pending member
 }
 
 message RemoveOrgMemberRequest {
