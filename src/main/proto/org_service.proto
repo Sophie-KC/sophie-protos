@@ -707,6 +707,10 @@ message OrgMember {
   repeated string team_ids = 11;
   bool is_guest = 12;
   bool integration = 13;     // an integration account — only in SearchOrgMembers with include_integrations
+  // PENDING_ACTIVATION only: when the activation link last emailed to them stops working (ISO-8601). Empty = no link
+  // was emailed (a ready account with an admin-set password) or the member is active. Past it, the invite is expired
+  // and an admin should ResendActivationEmail.
+  string activation_expires_at = 14;
 }
 
 message ListOrgMembersResponse {
