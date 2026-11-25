@@ -1638,6 +1638,13 @@ message ValidateApiTokenResponse {
   // The token belongs to an integration account (a system, not a person): it is not an AI app, so the
   // ai_agents switch and the AI-app policy don't apply to it; the route allowlist and scopes still do.
   bool integration = 9;
+  // Why a scope the token was created with may be missing from field 4 (0.148.0), so api-gateway can refuse with a
+  // precise code (ROLE_NOT_ALLOWED / ORG_ARCHIVED / ACCOUNT_RESTRICTED) instead of a generic missing-scope one.
+  // Set only when valid is true — an invalid, expired or revoked token learns nothing more. granted_scopes are the
+  // token's own (known) scopes as created, BEFORE the role cap and the read-only drop; never use them to authorize.
+  repeated string granted_scopes = 10;
+  bool org_archived = 11;        // the token's org is ARCHIVED (read-only): its write scopes are dropped
+  bool account_restricted = 12;  // staff restricted the owner's account (read-only): its write scopes are dropped
 }
 
 message IntegrationAccount {

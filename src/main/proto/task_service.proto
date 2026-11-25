@@ -2255,10 +2255,12 @@ message LogWorkRequest {
   optional int32 remaining_minutes = 7;
 }
 
+// A PATCH (0.148.0: field presence on every field): an unset field keeps the worklog's value; description set to ""
+// clears it. Wire-compatible with the old non-optional started_at/minutes (their defaults were never sent).
 message UpdateWorklogRequest {
   string worklog_id = 1;
-  string started_at = 2;
-  int32 minutes = 3;
+  optional string started_at = 2;
+  optional int32 minutes = 3;
   optional string description = 4;
 }
 
