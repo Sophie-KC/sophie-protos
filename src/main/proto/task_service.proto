@@ -856,6 +856,10 @@ message Task {
   // CreateTask with an external_ref that already names a task the caller can open returns THAT task with this set,
   // instead of creating a second one (§6 R1). Always false elsewhere.
   bool existing = 32;
+  // When the task last entered a DONE-category status (cleared when it leaves DONE), and when it first left TODO.
+  // For integrators computing completion times; claude/integrations-design-brief.md §4.
+  optional google.protobuf.Timestamp completed_at = 33;
+  optional google.protobuf.Timestamp started_at = 34;
 }
 
 // A record in another system that a task stands for. (org, system, external_id) names at most one task.

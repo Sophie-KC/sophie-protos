@@ -96,6 +96,21 @@ service IntegrationService {
   // The instance key is returned ONCE, here; only its hash is stored.
   rpc RegisterHostedInstance(RegisterHostedInstanceRequest) returns (RegisterHostedInstanceResponse);
   rpc RevokeHostedInstance(RevokeHostedInstanceRequest) returns (HostedInstance);
+
+  // ── Outgoing webhooks (claude/integrations-design-brief.md §4) — Org Admins only ─────────────────
+  // Each webhook belongs to an integration account of the org and receives only events that account can see.
+  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse);
+  // The signing secret is returned ONCE, here (and by RotateWebhookSecret); it is stored encrypted.
+  rpc CreateWebhook(CreateWebhookRequest) returns (CreateWebhookResponse);
+  rpc UpdateWebhook(UpdateWebhookRequest) returns (Webhook);
+  rpc DeleteWebhook(WebhookRef) returns (google.protobuf.Empty);
+  rpc ListWebhookDeliveries(ListWebhookDeliveriesRequest) returns (ListWebhookDeliveriesResponse);
+  // Sends a `ping` event right away and returns the finished delivery.
+  rpc SendWebhookTestEvent(WebhookRef) returns (WebhookDelivery);
+  // Sends the delivery's event again right away (same event id) and returns the delivery.
+  rpc RedeliverWebhook(RedeliverWebhookRequest) returns (WebhookDelivery);
+  // A new secret; the previous one keeps signing (as a second v1) for 24 hours.
+  rpc RotateWebhookSecret(WebhookRef) returns (RotateWebhookSecretResponse);
 }
 
 message Connection {
@@ -306,4 +321,108 @@ message RegisterHostedInstanceResponse {
 
 message RevokeHostedInstanceRequest {
   string instance_id = 1;
+}
+
+// ── Outgoing webhooks ────────────────────────────────────────────────────────────────────────────
+
+message Webhook {
+  string id = 1;
+  string org_id = 2;
+  string url = 3;
+  string description = 4;
+  string integration_account_id = 5;    // the integration account (users.id) whose visibility it delivers under
+  repeated string event_types = 6;      // task.created, task.updated, … (see ListWebhooksResponse.event_types)
+  repeated string project_ids = 7;      // empty = every project the account can see
+  bool enabled = 8;
+  string disabled_reason = 9;           // "" or FAILING (switched off after 3 days of failed deliveries)
+  google.protobuf.Timestamp disabled_at = 10;
+  google.protobuf.Timestamp failing_since = 11;
+  string secret_hint = 12;              // "whsec_ab12…" — never the secret
+  google.protobuf.Timestamp previous_secret_expires_at = 13;  // set for 24 h after a rotation
+  string created_by = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp updated_at = 16;
+  WebhookDelivery last_delivery = 17;   // unset when nothing was sent yet
+}
+
+message WebhookDelivery {
+  string id = 1;
+  string webhook_id = 2;
+  string event_id = 3;
+  string event_type = 4;
+  string status = 5;                    // PENDING | RETRYING | SUCCEEDED | FAILED
+  int32 attempts = 6;
+  int32 response_code = 7;              // 0 = no HTTP answer
+  string response_excerpt = 8;          // first 2 KB of the answer
+  string error = 9;                     // why the last attempt failed, when it did
+  int32 duration_ms = 10;               // last attempt; -1 = none yet
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp last_attempt_at = 12;
+  google.protobuf.Timestamp next_attempt_at = 13;
+  google.protobuf.Timestamp delivered_at = 14;
+  bool test = 15;
+}
+
+message WebhookRef {
+  string org_id = 1;
+  string webhook_id = 2;
+}
+
+message ListWebhooksRequest {
+  string org_id = 1;
+}
+
+message ListWebhooksResponse {
+  repeated Webhook webhooks = 1;
+  repeated string event_types = 2;      // every event type a webhook can subscribe to
+}
+
+message CreateWebhookRequest {
+  string org_id = 1;
+  string url = 2;                       // https, public address (on-prem may allow internal ones)
+  string integration_account_id = 3;
+  repeated string event_types = 4;      // at least one
+  repeated string project_ids = 5;
+  bool enabled = 6;
+  string description = 7;               // <= 200
+}
+
+message CreateWebhookResponse {
+  Webhook webhook = 1;
+  string secret = 2;                    // shown once
+}
+
+message UpdateWebhookRequest {
+  string org_id = 1;
+  string webhook_id = 2;
+  optional string url = 3;
+  optional string integration_account_id = 4;
+  bool set_event_types = 5;             // true = replace event_types with the list below
+  repeated string event_types = 6;
+  bool set_project_ids = 7;             // true = replace project_ids (empty = every project)
+  repeated string project_ids = 8;
+  optional bool enabled = 9;            // switching on clears disabled_reason / failing_since
+  optional string description = 10;
+}
+
+message ListWebhookDeliveriesRequest {
+  string org_id = 1;
+  string webhook_id = 2;
+  int32 limit = 3;                      // 0 = 50, at most 200
+}
+
+message ListWebhookDeliveriesResponse {
+  repeated WebhookDelivery deliveries = 1;   // newest first
+}
+
+message RedeliverWebhookRequest {
+  string org_id = 1;
+  string webhook_id = 2;
+  string delivery_id = 3;
+}
+
+message RotateWebhookSecretResponse {
+  string secret = 1;                    // shown once
+  google.protobuf.Timestamp previous_secret_expires_at = 2;
+  Webhook webhook = 3;
 }
